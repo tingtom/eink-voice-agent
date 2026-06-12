@@ -25,6 +25,13 @@ idf_component_register(
         "utils/base64.c"
     INCLUDE_DIRS
         "."
+        "audio"
+        "display"
+        "input"
+        "network"
+        "system"
+        "utils"
+        "modes"
     REQUIRES
         esp_wifi
         esp_http_client
