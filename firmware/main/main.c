@@ -7,6 +7,7 @@
 #include "esp_sleep.h"
 
 #include "app_config.h"
+#include "nvs_flash.h"
 #include "system_init.h"
 #include "wifi_manager.h"
 #include "epaper_driver.h"
@@ -17,54 +18,51 @@
 #include "mic_driver.h"
 #include "ws_client.h"
 #include "power_mgmt.h"
-#include "ulp_vad_shared.h"
 
 static const char *TAG = "MAIN";
+
+#define VAD_BURST_POLL_US  (200 * 1000)
+#define VAD_BURST_SAMPLES  256
+
+static bool handle_vad_burst(void)
+{
+    epaper_init();
+    mic_init();
+    mic_start();
+    vad_init();
+
+    int16_t buf[VAD_BURST_SAMPLES];
+    int energy_ok = 0;
+
+    for (int i = 0; i < 6; i++) {
+        size_t read = 0;
+        if (mic_read(buf, VAD_BURST_SAMPLES, &read) == ESP_OK && read > 0) {
+            int32_t energy = vad_compute_energy(buf, read);
+            if (energy >= AUDIO_VAD_THRESHOLD) energy_ok++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    mic_stop();
+    return energy_ok >= 3;
+}
 
 void app_main(void)
 {
     esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
 
-    if (wake_cause == ESP_SLEEP_WAKEUP_ULP) {
-        uint32_t reason = ulp_vad_data.wake_reason;
-        ulp_vad_data.flags &= ~ULP_FLAG_CPU_WAKE_REQUEST;
-        ESP_LOGI(TAG, "ULP wake: reason=%lu, buttons=0x%lx", reason, (unsigned long)ulp_vad_data.button_state);
-
-        if (reason == ULP_WAKE_TIMER) {
-            epaper_init();
-            ui_init();
-            mic_init();
-            mic_start();
-            vad_init();
-
-            int16_t buf[256];
-            size_t read = 0;
-            int energy_ok_count = 0;
-
-            for (int i = 0; i < 6; i++) {
-                if (mic_read(buf, 256, &read) == ESP_OK && read > 0) {
-                    int32_t energy = vad_compute_energy(buf, read);
-                    if (energy >= AUDIO_VAD_THRESHOLD) energy_ok_count++;
-                    ESP_LOGD(TAG, "Burst energy[%d]: %ld", i, (long)energy);
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-
-            mic_stop();
-
-            if (energy_ok_count >= 3) {
-                ESP_LOGI(TAG, "Voice detected, staying awake");
-            } else {
-                ESP_LOGI(TAG, "No voice detected, returning to sleep");
-                epaper_sleep();
-                power_enter_deep_sleep();
-                return;
-            }
+    if (wake_cause == ESP_SLEEP_WAKEUP_TIMER) {
+        if (handle_vad_burst()) {
+            ESP_LOGI(TAG, "Voice detected, full wake");
+            epaper_sleep();
+            esp_restart();
+        } else {
+            ESP_LOGI(TAG, "No voice, back to sleep");
+            power_enter_deep_sleep(VAD_BURST_POLL_US);
+            return;
         }
-
-        if (reason == ULP_WAKE_BUTTON) {
-            ESP_LOGI(TAG, "Button wake (mask=0x%lx)", (unsigned long)ulp_vad_data.button_state);
-        }
+    } else if (wake_cause == ESP_SLEEP_WAKEUP_GPIO) {
+        ESP_LOGI(TAG, "Button wake");
     }
 
     ESP_LOGI(TAG, "Device: %s", DEVICE_NAME);
@@ -103,7 +101,6 @@ void app_main(void)
     ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
     buttons_init();
     ui_show_home_screen();
-    power_ulp_load();
 
     ESP_LOGI(TAG, "Initialization complete, entering main loop");
 
@@ -113,10 +110,10 @@ void app_main(void)
         ui_update_wifi_status(wifi_is_connected());
 
         if (power_should_sleep()) {
-            ESP_LOGI(TAG, "Entering deep sleep with ULP...");
+            ESP_LOGI(TAG, "Entering deep sleep...");
             ui_show_sleep_screen();
             vTaskDelay(pdMS_TO_TICKS(100));
-            power_enter_deep_sleep();
+            power_enter_deep_sleep(0);
         }
 
         vTaskDelay(pdMS_TO_TICKS(5000));

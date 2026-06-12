@@ -69,9 +69,6 @@
 #define AUDIO_VAD_HANGOVER_MS       400
 #define AUDIO_MAX_WAKE_WORD_CHECKS  40
 
-// ── ULP Sleep / Wake ─────────────────────────────────────────
-#define ULP_DEEP_SLEEP_WAKEUP_PIN   BUTTON_SELECT_GPIO
-
 // ── Wake Word ────────────────────────────────────────────────
 #define WAKE_WORD           "hey merlin"
 #define WAKE_WORD_SENSITIVITY  0.7f
