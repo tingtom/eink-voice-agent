@@ -1,0 +1,37 @@
+# Main application CMakeLists.txt
+
+idf_component_register(
+    SRCS
+        "main.c"
+        "system/system_init.c"
+        "system/power_mgmt.c"
+        "audio/mic_driver.c"
+        "audio/audio_pipeline.c"
+        "audio/wake_word.c"
+        "audio/speaker_driver.c"
+        "display/epaper_driver.c"
+        "display/ui_manager.c"
+        "input/buttons.c"
+        "network/wifi_manager.c"
+        "network/ws_client.c"
+        "network/http_client.c"
+        "modes/mode_voice_agent.c"
+        "modes/mode_note.c"
+        "modes/mode_transcribe.c"
+        "modes/mode_games.c"
+        "modes/mode_dashboard.c"
+        "utils/ringbuffer.c"
+        "utils/base64.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_wifi
+        esp_http_client
+        esp_websocket_client
+        esp_adc
+        spi_flash
+        nvs_flash
+        driver
+        esp_timer
+        json
+)

@@ -1,0 +1,24 @@
+{
+  "name": "eink-voice-agent",
+  "description": "Handheld voice-powered AI agent on Waveshare ESP32-C6 e-Paper display",
+  "docs": [
+    "docs/project-overview.md",
+    "docs/hardware-details.md",
+    "docs/firmware-plan.md",
+    "docs/hermes-api-design.md",
+    "docs/ui-design.md"
+  ],
+  "firmware_framework": "ESP-IDF v5.x",
+  "target_chip": "ESP32-C6",
+  "build_command": "idf.py build",
+  "flash_command": "idf.py -p /dev/ttyUSB0 flash monitor",
+  "context": {
+    "board": "Waveshare ESP32-C6-ePaper-1.54 (1.54\" e-Paper, 200x200, B/W)",
+    "mic": "INMP441 I2S MEMS microphone",
+    "speaker": "MAX98357A I2S amplifier",
+    "battery": "3.7V LiPo with TP4056 USB-C charging",
+    "wake_word": "Edge Impulse TFLite keyword spotting",
+    "hermes_backend": "WebSocket audio streaming + HTTP REST api",
+    "display_refresh": "Partial ~0.3s, Full ~2s"
+  }
+}
