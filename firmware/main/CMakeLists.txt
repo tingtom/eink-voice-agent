@@ -9,6 +9,7 @@ idf_component_register(
         "audio/audio_pipeline.c"
         "audio/wake_word.c"
         "audio/speaker_driver.c"
+        "audio/vad.c"
         "display/epaper_driver.c"
         "display/ui_manager.c"
         "input/buttons.c"
@@ -22,6 +23,11 @@ idf_component_register(
         "modes/mode_dashboard.c"
         "utils/ringbuffer.c"
         "utils/base64.c"
+    ULP_SRCS
+        "ulp_vad/ulp_vad.c"
+    ULP_INCLUDE_DIRS
+        "."
+        "ulp_vad"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -34,4 +40,5 @@ idf_component_register(
         driver
         esp_timer
         json
+        ulp
 )
