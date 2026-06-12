@@ -23,11 +23,6 @@ idf_component_register(
         "modes/mode_dashboard.c"
         "utils/ringbuffer.c"
         "utils/base64.c"
-    ULP_SRCS
-        "ulp_vad/ulp_vad.c"
-    ULP_INCLUDE_DIRS
-        "."
-        "ulp_vad"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -41,3 +36,10 @@ idf_component_register(
         esp_timer
         ulp
 )
+
+if(CONFIG_ULP_COPROC_ENABLED)
+    ulp_riscv_register_binary(
+        "ulp_vad/ulp_vad.c"
+        INCLUDE_DIRS ".." "ulp_vad"
+    )
+endif()
