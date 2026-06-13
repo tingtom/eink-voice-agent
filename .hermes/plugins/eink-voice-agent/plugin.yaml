@@ -1,0 +1,13 @@
+name: eink-voice-agent
+version: 1.0.0
+description: "Build, flash, and test tools for E-Ink Voice Agent on ESP32-C6"
+author: "Project"
+kind: standalone
+
+provides_tools:
+  - build_firmware
+  - flash_firmware
+  - monitor_device
+  - ci_status
+
+label: "E-Ink Voice Agent"

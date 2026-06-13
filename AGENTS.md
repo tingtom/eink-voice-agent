@@ -23,6 +23,14 @@ idf.py -p /dev/ttyUSB0 flash monitor
 - `firmware/main/app_config.h` — all pins, WiFi, server URLs, thresholds
 - `.github/workflows/build.yml` — CI using `espressif/idf:v5.3`
 
+## Hermes Plugin
+
+```bash
+hermes plugins install /root/eink-voice-agent/.hermes/plugins/eink-voice-agent
+```
+
+Provides tools: `build_firmware`, `flash_firmware`, `monitor_device`, `ci_status`.
+
 ## Key Decisions
 - ES8311 audio codec (I2C+I2S) on Waveshare ESP32-C6-ePaper-1.54 — pin mapping in `app_config.h` needs verification against schematic
 - ULP RISC-V removed — not available in IDF v5.3 for ESP32-C6; uses timer+GPIO deep sleep instead
