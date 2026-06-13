@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "app_config.h"
 #include "mic_driver.h"

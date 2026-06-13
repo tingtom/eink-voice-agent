@@ -1,5 +1,7 @@
+#include <stddef.h>
 #include "esp_log.h"
 #include "app_config.h"
+#include "wake_word.h"
 
 static const char *TAG = "WAKE_WORD";
 

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"

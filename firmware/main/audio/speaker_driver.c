@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
