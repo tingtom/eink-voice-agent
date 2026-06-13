@@ -33,7 +33,7 @@
 #define SPK_I2S_BCLK_GPIO   18
 #define SPK_I2S_LRCK_GPIO   19
 #define SPK_I2S_DATA_GPIO   20
-#define SPK_I2S_PORT        I2S_NUM_1
+#define SPK_I2S_PORT        I2S_NUM_0
 #define SPK_ENABLE_GPIO     21
 
 // e-Paper Display (SPI)
