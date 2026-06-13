@@ -86,7 +86,7 @@
 
 // ── WebSocket ────────────────────────────────────────────────
 #define WS_RECONNECT_INTERVAL_MS 5000
-#define WS_PING_INTERVAL_MS     30000
+#define WS_PING_INTERVAL_SEC    30
 #define WS_TIMEOUT_MS           10000
 
 #endif // APP_CONFIG_H
