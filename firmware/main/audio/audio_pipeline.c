@@ -11,6 +11,7 @@
 #include "ws_client.h"
 #include "power_mgmt.h"
 #include "ringbuffer.h"
+#include "audio_pipeline.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 
