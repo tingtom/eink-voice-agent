@@ -1,12 +1,14 @@
-// UI Manager
 #pragma once
 #include <stdint.h>
+
 void ui_init(void);
 void ui_show_boot_screen(const char *device_name);
 void ui_show_home_screen(void);
 void ui_show_menu(const char **items, int count, int selected);
 void ui_show_recording_screen(void);
+void ui_update_recording_viz(int32_t energy);
 void ui_show_processing_screen(void);
+void ui_update_processing_anim(int frame);
 void ui_show_response(const char *text);
 void ui_show_error(const char *message);
 void ui_show_sleep_screen(void);

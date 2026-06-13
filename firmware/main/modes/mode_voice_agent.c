@@ -20,13 +20,15 @@ void mode_voice_agent_start(void)
 void mode_voice_agent_stop(void)
 {
     ESP_LOGI(TAG, "Voice agent mode stopped");
-    active = false;
     audio_pipeline_stop_recording();
-    ui_show_home_screen();
+    ui_show_processing_screen();
+    audio_pipeline_start_processing();
+    active = false;
 }
 
 void mode_voice_agent_handle_response(const char *text)
 {
     if (!active) return;
+    audio_pipeline_stop_processing();
     ui_show_response(text);
 }

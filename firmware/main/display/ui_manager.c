@@ -80,17 +80,52 @@ void ui_show_menu(const char **items, int count, int selected)
 void ui_show_recording_screen(void)
 {
     epaper_clear();
-    epaper_draw_text(10, 40, "Listening...", 16);
-    epaper_draw_text(10, 80, "Press BACK to cancel", 8);
+    epaper_draw_text(10, 12, "Listening...", 16);
+    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "BACK=cancel", 8);
     draw_status_bar();
     epaper_partial_refresh();
 }
 
+void ui_update_recording_viz(int32_t energy)
+{
+    int bar_count = 12;
+    int bar_w = 14;
+    int gap = 2;
+    int total_w = bar_count * (bar_w + gap) - gap;
+    int start_x = (DISPLAY_WIDTH - total_w) / 2;
+    int max_h = 55;
+    int base_y = 55;
+
+    for (int i = 0; i < bar_count; i++) {
+        int h = (energy * max_h) / 30000;
+        if (h < 2) h = 2;
+        if (h > max_h) h = max_h;
+        int x = start_x + i * (bar_w + gap);
+        epaper_draw_rect(x, base_y + (max_h - h), bar_w, h, 1);
+    }
+    epaper_partial_refresh();
+}
+
+static const int SPOKES[8][2] = {
+    {0, -28}, {20, -20}, {28, 0}, {20, 20},
+    {0, 28}, {-20, 20}, {-28, 0}, {-20, -20},
+};
+
 void ui_show_processing_screen(void)
 {
     epaper_clear();
-    epaper_draw_text(10, 60, "Thinking...", 16);
+    epaper_draw_text(10, 12, "Thinking...", 16);
     draw_status_bar();
+    epaper_partial_refresh();
+}
+
+void ui_update_processing_anim(int frame)
+{
+    int cx = DISPLAY_WIDTH / 2;
+    int cy = 80;
+    int n = frame % 8;
+
+    epaper_draw_line(cx, cy, cx + SPOKES[n][0], cy + SPOKES[n][1]);
     epaper_partial_refresh();
 }
 

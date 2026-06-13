@@ -1,5 +1,7 @@
 #include <string.h>
+#include <stdlib.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -12,11 +14,13 @@
 #include "power_mgmt.h"
 #include "ringbuffer.h"
 #include "audio_pipeline.h"
+#include "ui_manager.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 
 static ringbuffer_t audio_rb;
 static bool recording = false;
+static bool processing = false;
 static audio_mode_t current_mode = MODE_AGENT;
 
 static EventGroupHandle_t audio_events;
@@ -27,10 +31,13 @@ static EventGroupHandle_t audio_events;
 #define VAD_BURST_SAMPLES   ((AUDIO_SAMPLE_RATE * VAD_BURST_MS) / 1000)
 #define VAD_CONFIRM_FRAMES  4
 
+#define UI_UPDATE_INTERVAL_US  (300 * 1000)
+
 static void audio_capture_task(void *arg)
 {
     (void)arg;
     int16_t buf[VAD_BURST_SAMPLES];
+    int64_t last_ui = 0;
 
     while (1) {
         if (recording) {
@@ -41,9 +48,35 @@ static void audio_capture_task(void *arg)
                     ringbuffer_write(&audio_rb, buf, read);
                 }
                 ws_client_send_audio((uint8_t *)buf, read * sizeof(int16_t));
+
+                int64_t now = esp_timer_get_time();
+                if (now - last_ui > UI_UPDATE_INTERVAL_US) {
+                    last_ui = now;
+                    int32_t energy = 0;
+                    for (size_t i = 0; i < read; i++) energy += abs(buf[i]);
+                    energy /= (int32_t)read;
+                    ui_update_recording_viz(energy);
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+static void anim_task(void *arg)
+{
+    (void)arg;
+    int frame = 0;
+
+    while (1) {
+        if (recording) {
+            vTaskDelay(pdMS_TO_TICKS(300));
+        } else if (processing) {
+            ui_update_processing_anim(frame++);
+            vTaskDelay(pdMS_TO_TICKS(250));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
     }
 }
 
@@ -146,6 +179,7 @@ void audio_pipeline_init(void)
     audio_events = xEventGroupCreate();
 
     xTaskCreate(audio_capture_task, "audio_capture", 4096, NULL, 5, NULL);
+    xTaskCreate(anim_task, "anim", 2048, NULL, 3, NULL);
     xTaskCreate(vad_task, "vad", 3072, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
 
@@ -158,6 +192,7 @@ void audio_pipeline_start_recording(audio_mode_t mode)
     if (recording) return;
     current_mode = mode;
     recording = true;
+    processing = false;
     power_mark_activity();
     ESP_LOGI(TAG, "Recording started (mode=%d)", mode);
 }
@@ -168,6 +203,16 @@ void audio_pipeline_stop_recording(void)
     recording = false;
     vad_reset();
     ESP_LOGI(TAG, "Recording stopped");
+}
+
+void audio_pipeline_start_processing(void)
+{
+    processing = true;
+}
+
+void audio_pipeline_stop_processing(void)
+{
+    processing = false;
 }
 
 void audio_pipeline_play_tts(const uint8_t *audio, size_t len)
