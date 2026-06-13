@@ -12,7 +12,7 @@ static uint8_t battery = 0;
 
 static void draw_status_bar(void)
 {
-    char line[32];
+    char line[64];
     snprintf(line, sizeof(line), "%c %s  %s",
              wifi_ok ? 'O' : 'X',
              status_text,
