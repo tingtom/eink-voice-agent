@@ -10,18 +10,32 @@ static char status_text[32] = {0};
 static bool wifi_ok = false;
 static uint8_t battery = 0;
 
+static void draw_wifi_icon(int x, int y, bool connected)
+{
+    int bars[3] = {connected ? 9 : 9, connected ? 7 : 9, connected ? 5 : 9};
+    for (int i = 0; i < 3; i++) {
+        int x1 = x + (9 - bars[i]) / 2;
+        epaper_draw_line(x1, y + i * 3, x1 + bars[i] - 1, y + i * 3);
+    }
+}
+
+static void draw_battery_icon(int x, int y, int pct)
+{
+    int bw = 18, bh = 8;
+    epaper_draw_rect(x, y, bw, bh, 0);
+    epaper_draw_rect(x + bw, y + 2, 2, bh - 4, 1);
+    int fill_w = ((bw - 2) * pct) / 100;
+    if (fill_w > 0) epaper_draw_rect(x + 1, y + 1, fill_w, bh - 2, 1);
+}
+
 static void draw_status_bar(void)
 {
-    char line[64];
-    snprintf(line, sizeof(line), "%c %s  %s",
-             wifi_ok ? 'O' : 'X',
-             status_text,
-             "88%");
-    epaper_draw_text(0, 0, line, 8);
-
-    char buf[16];
-    snprintf(buf, sizeof(buf), "BAT:%d%%", battery);
-    epaper_draw_text(DISPLAY_WIDTH - 60, 0, buf, 8);
+    draw_wifi_icon(2, 2, wifi_ok);
+    epaper_draw_text(16, 1, status_text, 8);
+    draw_battery_icon(DISPLAY_WIDTH - 52, 2, battery);
+    char pct[8];
+    snprintf(pct, sizeof(pct), "%d%%", battery);
+    epaper_draw_text(DISPLAY_WIDTH - 30, 1, pct, 8);
 }
 
 void ui_init(void)
@@ -97,10 +111,29 @@ void ui_show_error(const char *message)
     epaper_full_refresh();
 }
 
+static void draw_moon_icon(int x, int y)
+{
+    int r = 5;
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= r * r && d2 >= (r - 1) * (r - 1))
+                epaper_draw_pixel(x + dx, y + dy, 0);
+        }
+    }
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = 0; dx <= 2; dx++) {
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= 3 * 3) epaper_draw_pixel(x + dx, y + dy, 1);
+        }
+    }
+}
+
 void ui_show_sleep_screen(void)
 {
     epaper_clear();
-    epaper_draw_text(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2, "Sleeping...", 12);
+    draw_moon_icon(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2 - 10);
+    epaper_draw_text(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2 + 10, "Sleeping...", 12);
     epaper_full_refresh();
 }
 
