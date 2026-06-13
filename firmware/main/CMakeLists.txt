@@ -13,6 +13,7 @@ idf_component_register(
         "display/epaper_driver.c"
         "display/ui_manager.c"
         "input/buttons.c"
+        "network/provisioning.c"
         "network/wifi_manager.c"
         "network/ws_client.c"
         "network/http_client.c"
@@ -35,6 +36,7 @@ idf_component_register(
     REQUIRES
         esp_wifi
         esp_http_client
+        esp_http_server
         esp_websocket_client
         esp_adc
         spi_flash

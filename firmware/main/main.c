@@ -18,6 +18,7 @@
 #include "mic_driver.h"
 #include "ws_client.h"
 #include "power_mgmt.h"
+#include "provisioning.h"
 
 static const char *TAG = "MAIN";
 
@@ -77,10 +78,25 @@ void app_main(void)
     system_init();
     epaper_init();
     ui_init();
+
+    if (!wifi_has_saved_creds()) {
+        ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");
+        ui_show_boot_screen("Setup Mode");
+        wifi_init();
+        provisioning_start_ap();
+        provisioning_start_server();
+        ui_show_error("Connect to WiFi:\nEInk-Voice-Config\nhttp://192.168.4.1");
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(60000));
+        }
+    }
+
     ui_show_boot_screen(DEVICE_NAME);
 
+    char ssid[64], password[64];
+    wifi_load_creds(ssid, sizeof(ssid), password, sizeof(password));
     wifi_init();
-    wifi_connect(WIFI_SSID, WIFI_PASSWORD);
+    wifi_connect(ssid, password);
 
     int retries = 0;
     while (!wifi_is_connected() && retries < 30) {
@@ -92,9 +108,13 @@ void app_main(void)
         ESP_LOGI(TAG, "WiFi connected");
         ui_update_status_bar(true, power_get_battery_pct());
     } else {
-        ESP_LOGW(TAG, "WiFi connection failed, continuing offline");
-        ui_show_error("WiFi failed");
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        ESP_LOGW(TAG, "WiFi connection failed, starting provisioning");
+        provisioning_start_ap();
+        provisioning_start_server();
+        ui_show_error("WiFi failed\nConnect to:\nEInk-Voice-Config\nhttp://192.168.4.1");
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(60000));
+        }
     }
 
     audio_pipeline_init();

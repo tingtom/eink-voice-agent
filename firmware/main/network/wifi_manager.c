@@ -4,11 +4,16 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_config.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "WIFI";
+static const char *NVS_NS = "wifi";
+static const char *NVS_KEY_SSID = "ssid";
+static const char *NVS_KEY_PASS = "password";
 
 static EventGroupHandle_t wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
@@ -90,4 +95,55 @@ int8_t wifi_get_rssi(void)
         current_rssi = ap.rssi;
     }
     return current_rssi;
+}
+
+esp_err_t wifi_save_creds(const char *ssid, const char *password)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+
+    err = nvs_set_str(h, NVS_KEY_SSID, ssid);
+    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_PASS, password);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t wifi_load_creds(char *ssid, size_t ssid_len, char *password, size_t pass_len)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+
+    size_t len = ssid_len;
+    err = nvs_get_str(h, NVS_KEY_SSID, ssid, &len);
+    if (err != ESP_OK) { nvs_close(h); return err; }
+
+    len = pass_len;
+    err = nvs_get_str(h, NVS_KEY_PASS, password, &len);
+    nvs_close(h);
+    return err;
+}
+
+bool wifi_has_saved_creds(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+    char buf[4];
+    size_t len = sizeof(buf);
+    esp_err_t err = nvs_get_str(h, NVS_KEY_SSID, buf, &len);
+    nvs_close(h);
+    return err == ESP_OK;
+}
+
+void wifi_erase_creds(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_erase_all(h);
+        nvs_commit(h);
+        nvs_close(h);
+        ESP_LOGI(TAG, "WiFi credentials erased");
+    }
 }
