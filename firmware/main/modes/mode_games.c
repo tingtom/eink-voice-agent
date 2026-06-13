@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include "esp_log.h"
 #include "ui_manager.h"
+#include "mode_games.h"
 
 static const char *TAG = "MODE_GAMES";
 static bool active = false;

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include "mode_dashboard.h"
 #include "esp_log.h"
 #include "ui_manager.h"
 

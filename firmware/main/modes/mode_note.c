@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdbool.h>
+#include "mode_note.h"
 #include "esp_log.h"
 #include "audio_pipeline.h"
 #include "ui_manager.h"
