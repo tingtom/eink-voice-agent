@@ -23,6 +23,7 @@ idf_component_register(
         "modes/mode_transcribe.c"
         "modes/mode_games.c"
         "modes/mode_dashboard.c"
+        "storage/offline_notes.c"
         "utils/ringbuffer.c"
         "utils/base64.c"
     INCLUDE_DIRS
@@ -34,6 +35,7 @@ idf_component_register(
         "system"
         "utils"
         "modes"
+        "storage"
     REQUIRES
         esp_wifi
         esp_http_client
@@ -44,4 +46,5 @@ idf_component_register(
         nvs_flash
         driver
         esp_timer
+        spiffs
 )

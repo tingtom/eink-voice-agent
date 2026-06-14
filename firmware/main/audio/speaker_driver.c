@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include "freertos/FreeRTOS.h"
@@ -83,6 +84,45 @@ esp_err_t speaker_play(const int16_t *audio, size_t samples)
     i2s_channel_disable(spk_chan);
 
     return ret;
+}
+
+void speaker_play_file(const char *pcm_path)
+{
+    if (!spk_chan) return;
+
+    FILE *f = fopen(pcm_path, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "Cannot open %s", pcm_path);
+        return;
+    }
+
+    esp_err_t ret = i2s_channel_enable(spk_chan);
+    if (ret != ESP_OK) { fclose(f); return; }
+
+    is_playing = true;
+    const size_t chunk = 512;
+    int16_t buf[chunk];
+    int16_t scaled[chunk];
+
+    while (1) {
+        size_t read = fread(buf, sizeof(int16_t), chunk, f);
+        if (read == 0) break;
+
+        int16_t *src = buf;
+        if (volume < 100) {
+            for (size_t i = 0; i < read; i++)
+                scaled[i] = (buf[i] * volume) / 100;
+            src = scaled;
+        }
+        size_t written = 0;
+        i2s_channel_write(spk_chan, src, read * sizeof(int16_t), &written, portMAX_DELAY);
+    }
+
+    fclose(f);
+    is_playing = false;
+    i2s_channel_disable(spk_chan);
+
+    ESP_LOGI(TAG, "Playback finished: %s", pcm_path);
 }
 
 void speaker_stop(void)

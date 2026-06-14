@@ -14,6 +14,7 @@
 #include "power_mgmt.h"
 #include "ringbuffer.h"
 #include "audio_pipeline.h"
+#include "offline_notes.h"
 #include "ui_manager.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
@@ -22,6 +23,7 @@ static ringbuffer_t audio_rb;
 static bool recording = false;
 static bool processing = false;
 static audio_mode_t current_mode = MODE_AGENT;
+static bool offline_recording = false;
 
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
@@ -44,12 +46,16 @@ static void audio_capture_task(void *arg)
             size_t read = 0;
             esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
             if (ret == ESP_OK && read > 0) {
-                if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
-                    ringbuffer_write(&audio_rb, buf, read);
+                if (offline_recording) {
+                    offline_note_write_audio(buf, read);
+                } else {
+                    if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
+                        ringbuffer_write(&audio_rb, buf, read);
+                    }
+                    const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
+                    ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
+                                              mode_str[current_mode]);
                 }
-                const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
-                ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
-                                          mode_str[current_mode]);
 
                 int64_t now = esp_timer_get_time();
                 if (now - last_ui > UI_UPDATE_INTERVAL_US) {
@@ -242,4 +248,30 @@ void audio_pipeline_play_tts(const uint8_t *audio, size_t len)
 bool audio_pipeline_is_recording(void)
 {
     return recording;
+}
+
+bool audio_pipeline_start_offline_recording(void)
+{
+    if (recording) return false;
+    if (!offline_note_start()) return false;
+    recording = true;
+    offline_recording = true;
+    processing = false;
+    power_mark_activity();
+    ESP_LOGI(TAG, "Offline recording started");
+    return true;
+}
+
+void audio_pipeline_stop_offline_recording(void)
+{
+    if (!recording || !offline_recording) return;
+    recording = false;
+    offline_recording = false;
+    offline_note_stop();
+    ESP_LOGI(TAG, "Offline recording stopped");
+}
+
+bool audio_pipeline_is_offline_recording(void)
+{
+    return offline_recording;
 }

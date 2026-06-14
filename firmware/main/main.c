@@ -26,6 +26,7 @@
 #include "mode_todo.h"
 #include "mode_dashboard.h"
 #include "mode_games.h"
+#include "offline_notes.h"
 
 static const char *TAG = "MAIN";
 
@@ -40,6 +41,8 @@ typedef enum {
     APP_MODE_TODO,
     APP_MODE_DASHBOARD,
     APP_MODE_GAMES,
+    APP_MODE_VIEW_NOTES,
+    APP_MODE_SYNC,
 } app_mode_t;
 
 typedef enum {
@@ -47,11 +50,17 @@ typedef enum {
     SUB_RECORDING,
     SUB_PROCESSING,
     SUB_RESPONSE,
+    SUB_NOTE_LIST,
+    SUB_NOTE_DETAIL,
 } sub_state_t;
 
 static app_mode_t current_app_mode = APP_MODE_HOME;
 static sub_state_t current_sub = SUB_MENU;
 static int menu_selection = 0;
+
+// View notes state
+static int notes_list_offset = 0;
+static int notes_sel = 0;
 
 static const char *menu_items[] = {
     "Voice Agent",
@@ -60,6 +69,8 @@ static const char *menu_items[] = {
     "Todo List",
     "Dashboard",
     "Games",
+    "View Notes",
+    "Sync",
 };
 static const int menu_count = sizeof(menu_items) / sizeof(menu_items[0]);
 
@@ -70,6 +81,8 @@ static app_mode_t menu_mode_map[] = {
     APP_MODE_TODO,
     APP_MODE_DASHBOARD,
     APP_MODE_GAMES,
+    APP_MODE_VIEW_NOTES,
+    APP_MODE_SYNC,
 };
 
 static void enter_mode(app_mode_t mode)
@@ -99,6 +112,29 @@ static void enter_mode(app_mode_t mode)
         case APP_MODE_GAMES:
             mode_games_start();
             break;
+        case APP_MODE_VIEW_NOTES:
+            notes_sel = 0;
+            notes_list_offset = 0;
+            current_sub = SUB_NOTE_LIST;
+            // Fall through to draw
+            ui_show_menu((const char **)NULL, 0, 0); // clear screen
+            // Will draw note list on next button press
+            break;
+        case APP_MODE_SYNC:
+            if (!ws_client_is_connected()) {
+                ui_show_error("No WiFi\nCan't sync");
+                current_app_mode = APP_MODE_HOME;
+                current_sub = SUB_MENU;
+                return;
+            }
+            if (offline_note_pending_sync_count() == 0) {
+                ui_show_response("Nothing to sync!");
+                current_sub = SUB_RESPONSE;
+                return;
+            }
+            ui_show_processing_screen();
+            offline_note_sync_start();
+            break;
         default:
             break;
     }
@@ -123,10 +159,75 @@ static void finish_current_mode(void)
     }
 }
 
+// ── Draw note list screen ───────────────────────────────────
+
+static void draw_note_list(void)
+{
+    int count = offline_note_count();
+    if (count == 0) {
+        epaper_clear();
+        epaper_draw_text(10, 60, "No offline notes", 12);
+        epaper_partial_refresh();
+        return;
+    }
+
+    if (notes_sel < 0) notes_sel = 0;
+    if (notes_sel >= count) notes_sel = count - 1;
+
+    // Auto-scroll
+    int visible = (DISPLAY_HEIGHT - 30) / 14; // ~12 items
+    if (notes_sel < notes_list_offset) notes_list_offset = notes_sel;
+    if (notes_sel >= notes_list_offset + visible)
+        notes_list_offset = notes_sel - visible + 1;
+
+    epaper_clear();
+    epaper_draw_text(4, 8, "Offline Notes", 12);
+
+    int y = 26;
+    for (int i = notes_list_offset; i < count && i < notes_list_offset + visible; i++) {
+        char synced = offline_note_is_synced(i) ? '*' : ' ';
+        char line[32];
+        if (i == notes_sel) {
+            char name[NOTE_NAME_LEN];
+            offline_note_get_name(i, name, sizeof(name));
+            snprintf(line, sizeof(line), ">%s %c", name + 5, synced);
+        } else {
+            char name[NOTE_NAME_LEN];
+            offline_note_get_name(i, name, sizeof(name));
+            snprintf(line, sizeof(line), " %s %c", name + 5, synced);
+        }
+        epaper_draw_text(8, y, line, 8);
+        y += 14;
+    }
+
+    epaper_draw_text(4, DISPLAY_HEIGHT - 14, "*=synced  SEL=play", 8);
+    epaper_partial_refresh();
+}
+
+static void draw_note_detail(int idx)
+{
+    char name[NOTE_NAME_LEN], text[NOTE_TEXT_MAX];
+    offline_note_get_name(idx, name, sizeof(name));
+    offline_note_get_text(idx, text, sizeof(text));
+
+    epaper_clear();
+    epaper_draw_text(4, 8, name, 12);
+
+    if (offline_note_is_synced(idx)) {
+        epaper_draw_text(4, 24, text, 8);
+    } else {
+        epaper_draw_text(4, 30, "Not transcribed", 8);
+    }
+
+    epaper_draw_text(4, DISPLAY_HEIGHT - 14, "SEL=play  long=back", 8);
+    epaper_partial_refresh();
+}
+
+// ── Button handler ─────────────────────────────────────────
+
 static void handle_longpress(button_id_t btn)
 {
     (void)btn;
-    // Universal "back / cancel / go home" action
 
     if (current_app_mode == APP_MODE_HOME) {
         ESP_LOGI(TAG, "Going to sleep from menu");
@@ -142,8 +243,14 @@ static void handle_longpress(button_id_t btn)
         return;
     }
 
+    if (current_app_mode == APP_MODE_VIEW_NOTES || current_app_mode == APP_MODE_SYNC) {
+        return_home();
+        return;
+    }
+
     switch (current_sub) {
     case SUB_RECORDING:
+        audio_pipeline_stop_offline_recording();
         audio_pipeline_stop_recording();
         return_home();
         break;
@@ -183,6 +290,36 @@ static void handle_button(button_id_t btn)
         return;
     }
 
+    if (current_app_mode == APP_MODE_VIEW_NOTES) {
+        int count = offline_note_count();
+        if (count == 0) { return_home(); return; }
+
+        if (current_sub == SUB_NOTE_LIST) {
+            if (btn == BUTTON_UP) { notes_sel--; draw_note_list(); }
+            else if (btn == BUTTON_DOWN) { notes_sel++; draw_note_list(); }
+            else if (btn == BUTTON_SELECT) {
+                current_sub = SUB_NOTE_DETAIL;
+                draw_note_detail(notes_sel);
+            }
+        } else if (current_sub == SUB_NOTE_DETAIL) {
+            if (btn == BUTTON_SELECT) {
+                offline_note_play(notes_sel);
+                draw_note_detail(notes_sel);
+            } else if (btn == BUTTON_UP || btn == BUTTON_DOWN) {
+                current_sub = SUB_NOTE_LIST;
+                draw_note_list();
+            }
+        }
+        return;
+    }
+
+    if (current_app_mode == APP_MODE_SYNC) {
+        if (btn == BUTTON_SELECT) {
+            return_home();
+        }
+        return;
+    }
+
     if (current_sub == SUB_RECORDING) {
         if (btn == BUTTON_SELECT) {
             switch (current_app_mode) {
@@ -215,6 +352,8 @@ static void handle_button(button_id_t btn)
     }
 }
 
+// ── WebSocket message handler ───────────────────────────────
+
 static void handle_ws_message(const char *data, size_t len)
 {
     (void)len;
@@ -240,6 +379,32 @@ static void handle_ws_message(const char *data, size_t len)
     memcpy(text, data_start, text_len);
     text[text_len] = '\0';
 
+    // Route to sync handler when syncing
+    if (offline_note_sync_is_busy()) {
+        // Find session_id if present
+        const char *sid_key = "\"session_id\":\"";
+        const char *sid_start = strstr(data, sid_key);
+        if (sid_start) {
+            sid_start += strlen(sid_key);
+            const char *sid_end = strchr(sid_start, '"');
+            if (sid_end) {
+                size_t sid_len = sid_end - sid_start;
+                // Session IDs for sync notes are "sync_note_XXXXX"
+                char *sid = malloc(sid_len + 1);
+                if (sid) {
+                    memcpy(sid, sid_start, sid_len);
+                    sid[sid_len] = '\0';
+                    // The offline_notes module handles it
+                    extern void offline_note_sync_handle_response(const char *session, const char *txt);
+                    offline_note_sync_handle_response(sid, text);
+                    free(sid);
+                }
+            }
+        }
+        free(text);
+        return;
+    }
+
     switch (current_app_mode) {
         case APP_MODE_VOICE_AGENT:
             mode_voice_agent_handle_response(text);
@@ -260,6 +425,8 @@ static void handle_ws_message(const char *data, size_t len)
     free(text);
     current_sub = SUB_RESPONSE;
 }
+
+// ── VAD burst for timer wake ────────────────────────────────
 
 static bool handle_vad_burst(void)
 {
@@ -283,6 +450,8 @@ static bool handle_vad_burst(void)
     mic_stop();
     return energy_ok >= 3;
 }
+
+// ── Main ────────────────────────────────────────────────────
 
 void app_main(void)
 {
@@ -314,6 +483,7 @@ void app_main(void)
     system_init();
     epaper_init();
     ui_init();
+    offline_notes_init();
 
     if (!wifi_has_saved_creds()) {
         ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");
