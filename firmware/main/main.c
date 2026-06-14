@@ -98,7 +98,6 @@ static void enter_mode(app_mode_t mode)
             break;
         case APP_MODE_GAMES:
             mode_games_start();
-            current_sub = SUB_MENU;
             break;
         default:
             break;
@@ -113,6 +112,54 @@ static void return_home(void)
     ui_show_home_screen();
 }
 
+static void finish_current_mode(void)
+{
+    switch (current_app_mode) {
+        case APP_MODE_VOICE_AGENT: mode_voice_agent_finish(); break;
+        case APP_MODE_TRANSCRIBE:  mode_transcribe_finish();  break;
+        case APP_MODE_NOTE:        mode_note_finish();        break;
+        case APP_MODE_TODO:        mode_todo_finish();        break;
+        default: break;
+    }
+}
+
+static void handle_longpress(button_id_t btn)
+{
+    (void)btn;
+    // Universal "back / cancel / go home" action
+
+    if (current_app_mode == APP_MODE_HOME) {
+        ESP_LOGI(TAG, "Going to sleep from menu");
+        ui_show_sleep_screen();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        power_enter_deep_sleep(0);
+        return;
+    }
+
+    if (current_app_mode == APP_MODE_GAMES) {
+        mode_games_finish();
+        return_home();
+        return;
+    }
+
+    switch (current_sub) {
+    case SUB_RECORDING:
+        audio_pipeline_stop_recording();
+        return_home();
+        break;
+    case SUB_PROCESSING:
+        finish_current_mode();
+        return_home();
+        break;
+    case SUB_RESPONSE:
+        finish_current_mode();
+        return_home();
+        break;
+    default:
+        break;
+    }
+}
+
 static void handle_button(button_id_t btn)
 {
     if (current_app_mode == APP_MODE_HOME) {
@@ -124,11 +171,14 @@ static void handle_button(button_id_t btn)
             ui_show_menu(menu_items, menu_count, menu_selection);
         } else if (btn == BUTTON_SELECT) {
             enter_mode(menu_mode_map[menu_selection]);
-        } else if (btn == BUTTON_BACK) {
-            ESP_LOGI(TAG, "Going to sleep from menu");
-            ui_show_sleep_screen();
-            vTaskDelay(pdMS_TO_TICKS(100));
-            power_enter_deep_sleep(0);
+        }
+        return;
+    }
+
+    if (current_app_mode == APP_MODE_GAMES) {
+        mode_games_handle_button(btn);
+        if (!mode_games_is_active()) {
+            return_home();
         }
         return;
     }
@@ -152,54 +202,13 @@ static void handle_button(button_id_t btn)
                     break;
             }
             current_sub = SUB_PROCESSING;
-        } else if (btn == BUTTON_BACK) {
-            audio_pipeline_stop_recording();
-            return_home();
-        }
-        return;
-    }
-
-    if (current_sub == SUB_PROCESSING) {
-        if (btn == BUTTON_BACK) {
-            switch (current_app_mode) {
-                case APP_MODE_VOICE_AGENT:
-                    mode_voice_agent_finish();
-                    break;
-                case APP_MODE_TRANSCRIBE:
-                    mode_transcribe_finish();
-                    break;
-                case APP_MODE_NOTE:
-                    mode_note_finish();
-                    break;
-                case APP_MODE_TODO:
-                    mode_todo_finish();
-                    break;
-                default:
-                    break;
-            }
-            return_home();
         }
         return;
     }
 
     if (current_sub == SUB_RESPONSE) {
-        if (btn == BUTTON_SELECT || btn == BUTTON_BACK) {
-            switch (current_app_mode) {
-                case APP_MODE_VOICE_AGENT:
-                    mode_voice_agent_finish();
-                    break;
-                case APP_MODE_TRANSCRIBE:
-                    mode_transcribe_finish();
-                    break;
-                case APP_MODE_NOTE:
-                    mode_note_finish();
-                    break;
-                case APP_MODE_TODO:
-                    mode_todo_finish();
-                    break;
-                default:
-                    break;
-            }
+        if (btn == BUTTON_SELECT) {
+            finish_current_mode();
             return_home();
         }
         return;
@@ -347,6 +356,7 @@ void app_main(void)
     audio_pipeline_init();
     ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
     button_set_callback(handle_button);
+    button_set_longpress_callback(handle_longpress, 1500);
     ws_client_set_callback(handle_ws_message);
     buttons_init();
     ui_show_home_screen();

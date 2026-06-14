@@ -81,7 +81,7 @@ void ui_show_recording_screen(void)
 {
     epaper_clear();
     epaper_draw_text(10, 12, "Listening...", 16);
-    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "BACK=cancel", 8);
+    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=cancel", 8);
     draw_status_bar();
     epaper_partial_refresh();
 }

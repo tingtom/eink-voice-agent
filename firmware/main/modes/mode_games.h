@@ -1,12 +1,8 @@
-// Mode: Games
+// Mode: Tomagotchi
 #pragma once
-typedef enum {
-    GAME_TRIVIA,
-    GAME_WORD,
-    GAME_20Q,
-    GAME_MATH,
-    GAME_COUNT
-} game_id_t;
+#include <stdbool.h>
+
 void mode_games_start(void);
-void mode_games_select(game_id_t game);
-void mode_games_handle_input(const char *input);
+void mode_games_handle_button(int btn);
+void mode_games_finish(void);
+bool mode_games_is_active(void);
