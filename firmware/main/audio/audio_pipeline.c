@@ -47,7 +47,7 @@ static void audio_capture_task(void *arg)
                 if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                     ringbuffer_write(&audio_rb, buf, read);
                 }
-                const char *mode_str[] = {"agent", "note", "transcribe"};
+                const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
                 ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
                                           mode_str[current_mode]);
 
@@ -219,7 +219,7 @@ void audio_pipeline_stop_processing(void)
 
 void audio_pipeline_send_end_recording(void)
 {
-    const char *mode_str[] = {"agent", "note", "transcribe"};
+    const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
     char msg[128];
     snprintf(msg, sizeof(msg),
              "{\"type\":\"end\",\"mode\":\"%s\",\"session_id\":\"\"}",

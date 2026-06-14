@@ -7,7 +7,8 @@
 typedef enum {
     MODE_AGENT,
     MODE_NOTE,
-    MODE_TRANSCRIBE
+    MODE_TRANSCRIBE,
+    MODE_TODO
 } audio_mode_t;
 
 void audio_pipeline_init(void);

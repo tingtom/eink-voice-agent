@@ -19,8 +19,17 @@ void mode_note_start(void)
 void mode_note_stop(void)
 {
     ESP_LOGI(TAG, "Note mode stopped");
-    active = false;
     audio_pipeline_stop_recording();
+    audio_pipeline_send_end_recording();
+    ui_show_processing_screen();
+    audio_pipeline_start_processing();
+}
+
+void mode_note_finish(void)
+{
+    if (!active) return;
+    audio_pipeline_stop_processing();
+    active = false;
     ui_show_home_screen();
 }
 

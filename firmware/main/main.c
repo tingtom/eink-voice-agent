@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -19,11 +20,237 @@
 #include "ws_client.h"
 #include "power_mgmt.h"
 #include "provisioning.h"
+#include "mode_voice_agent.h"
+#include "mode_transcribe.h"
+#include "mode_note.h"
+#include "mode_todo.h"
+#include "mode_dashboard.h"
+#include "mode_games.h"
 
 static const char *TAG = "MAIN";
 
 #define VAD_BURST_POLL_US  (200 * 1000)
 #define VAD_BURST_SAMPLES  256
+
+typedef enum {
+    APP_MODE_HOME,
+    APP_MODE_VOICE_AGENT,
+    APP_MODE_TRANSCRIBE,
+    APP_MODE_NOTE,
+    APP_MODE_TODO,
+    APP_MODE_DASHBOARD,
+    APP_MODE_GAMES,
+} app_mode_t;
+
+typedef enum {
+    SUB_MENU,
+    SUB_RECORDING,
+    SUB_PROCESSING,
+    SUB_RESPONSE,
+} sub_state_t;
+
+static app_mode_t current_app_mode = APP_MODE_HOME;
+static sub_state_t current_sub = SUB_MENU;
+static int menu_selection = 0;
+
+static const char *menu_items[] = {
+    "Voice Agent",
+    "Transcribe",
+    "Voice Note",
+    "Todo List",
+    "Dashboard",
+    "Games",
+};
+static const int menu_count = sizeof(menu_items) / sizeof(menu_items[0]);
+
+static app_mode_t menu_mode_map[] = {
+    APP_MODE_VOICE_AGENT,
+    APP_MODE_TRANSCRIBE,
+    APP_MODE_NOTE,
+    APP_MODE_TODO,
+    APP_MODE_DASHBOARD,
+    APP_MODE_GAMES,
+};
+
+static void enter_mode(app_mode_t mode)
+{
+    current_app_mode = mode;
+    switch (mode) {
+        case APP_MODE_VOICE_AGENT:
+            mode_voice_agent_start();
+            current_sub = SUB_RECORDING;
+            break;
+        case APP_MODE_TRANSCRIBE:
+            mode_transcribe_start();
+            current_sub = SUB_RECORDING;
+            break;
+        case APP_MODE_NOTE:
+            mode_note_start();
+            current_sub = SUB_RECORDING;
+            break;
+        case APP_MODE_TODO:
+            mode_todo_start();
+            current_sub = SUB_RECORDING;
+            break;
+        case APP_MODE_DASHBOARD:
+            mode_dashboard_start();
+            current_sub = SUB_RESPONSE;
+            break;
+        case APP_MODE_GAMES:
+            mode_games_start();
+            current_sub = SUB_MENU;
+            break;
+        default:
+            break;
+    }
+}
+
+static void return_home(void)
+{
+    current_app_mode = APP_MODE_HOME;
+    current_sub = SUB_MENU;
+    menu_selection = 0;
+    ui_show_home_screen();
+}
+
+static void handle_button(button_id_t btn)
+{
+    if (current_app_mode == APP_MODE_HOME) {
+        if (btn == BUTTON_UP && menu_selection > 0) {
+            menu_selection--;
+            ui_show_menu(menu_items, menu_count, menu_selection);
+        } else if (btn == BUTTON_DOWN && menu_selection < menu_count - 1) {
+            menu_selection++;
+            ui_show_menu(menu_items, menu_count, menu_selection);
+        } else if (btn == BUTTON_SELECT) {
+            enter_mode(menu_mode_map[menu_selection]);
+        } else if (btn == BUTTON_BACK) {
+            ESP_LOGI(TAG, "Going to sleep from menu");
+            ui_show_sleep_screen();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            power_enter_deep_sleep(0);
+        }
+        return;
+    }
+
+    if (current_sub == SUB_RECORDING) {
+        if (btn == BUTTON_SELECT) {
+            switch (current_app_mode) {
+                case APP_MODE_VOICE_AGENT:
+                    mode_voice_agent_stop();
+                    break;
+                case APP_MODE_TRANSCRIBE:
+                    mode_transcribe_stop();
+                    break;
+                case APP_MODE_NOTE:
+                    mode_note_stop();
+                    break;
+                case APP_MODE_TODO:
+                    mode_todo_stop();
+                    break;
+                default:
+                    break;
+            }
+            current_sub = SUB_PROCESSING;
+        } else if (btn == BUTTON_BACK) {
+            audio_pipeline_stop_recording();
+            return_home();
+        }
+        return;
+    }
+
+    if (current_sub == SUB_PROCESSING) {
+        if (btn == BUTTON_BACK) {
+            switch (current_app_mode) {
+                case APP_MODE_VOICE_AGENT:
+                    mode_voice_agent_finish();
+                    break;
+                case APP_MODE_TRANSCRIBE:
+                    mode_transcribe_finish();
+                    break;
+                case APP_MODE_NOTE:
+                    mode_note_finish();
+                    break;
+                case APP_MODE_TODO:
+                    mode_todo_finish();
+                    break;
+                default:
+                    break;
+            }
+            return_home();
+        }
+        return;
+    }
+
+    if (current_sub == SUB_RESPONSE) {
+        if (btn == BUTTON_SELECT || btn == BUTTON_BACK) {
+            switch (current_app_mode) {
+                case APP_MODE_VOICE_AGENT:
+                    mode_voice_agent_finish();
+                    break;
+                case APP_MODE_TRANSCRIBE:
+                    mode_transcribe_finish();
+                    break;
+                case APP_MODE_NOTE:
+                    mode_note_finish();
+                    break;
+                case APP_MODE_TODO:
+                    mode_todo_finish();
+                    break;
+                default:
+                    break;
+            }
+            return_home();
+        }
+        return;
+    }
+}
+
+static void handle_ws_message(const char *data, size_t len)
+{
+    (void)len;
+    const char *type_key = "\"type\":\"";
+    const char *type_start = strstr(data, type_key);
+    if (!type_start) return;
+    type_start += strlen(type_key);
+    if (strncmp(type_start, "response", 8) != 0) return;
+
+    const char *data_key = "\"data\":\"";
+    const char *data_start = strstr(data, data_key);
+    if (!data_start) return;
+    data_start += strlen(data_key);
+
+    const char *end = strchr(data_start, '"');
+    if (!end) return;
+
+    size_t text_len = end - data_start;
+    if (text_len == 0) return;
+
+    char *text = malloc(text_len + 1);
+    if (!text) return;
+    memcpy(text, data_start, text_len);
+    text[text_len] = '\0';
+
+    switch (current_app_mode) {
+        case APP_MODE_VOICE_AGENT:
+            mode_voice_agent_handle_response(text);
+            break;
+        case APP_MODE_TRANSCRIBE:
+            mode_transcribe_handle_response(text);
+            break;
+        case APP_MODE_NOTE:
+            mode_note_save(text);
+            break;
+        case APP_MODE_TODO:
+            mode_todo_handle_response(text);
+            break;
+        default:
+            free(text);
+            return;
+    }
+    free(text);
+    current_sub = SUB_RESPONSE;
+}
 
 static bool handle_vad_burst(void)
 {
@@ -119,6 +346,8 @@ void app_main(void)
 
     audio_pipeline_init();
     ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
+    button_set_callback(handle_button);
+    ws_client_set_callback(handle_ws_message);
     buttons_init();
     ui_show_home_screen();
 

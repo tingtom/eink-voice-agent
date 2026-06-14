@@ -23,7 +23,14 @@ void mode_transcribe_stop(void)
     audio_pipeline_send_end_recording();
     ui_show_processing_screen();
     audio_pipeline_start_processing();
+}
+
+void mode_transcribe_finish(void)
+{
+    if (!active) return;
+    audio_pipeline_stop_processing();
     active = false;
+    ui_show_home_screen();
 }
 
 void mode_transcribe_handle_response(const char *text)
