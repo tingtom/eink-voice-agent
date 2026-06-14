@@ -1,13 +1,16 @@
 name: eink-voice-agent
+kind: platform
 version: 1.0.0
-description: "Build, flash, and test tools for E-Ink Voice Agent on ESP32-C6"
+description: "Phyiscal E-Ink Voice Agent device interaction — WebSocket server for audio/text conversations via Hermes Agent"
 author: "Project"
-kind: standalone
-
-provides_tools:
-  - build_firmware
-  - flash_firmware
-  - monitor_device
-  - ci_status
-
 label: "E-Ink Voice Agent"
+
+optional_env:
+  - name: EINK_DEVICE_PORT
+    description: "WebSocket server port (default: 8123)"
+    prompt: "Device server port"
+    password: false
+  - name: EINK_DEVICE_HOST
+    description: "WebSocket server bind address (default: 0.0.0.0)"
+    prompt: "Bind address"
+    password: false

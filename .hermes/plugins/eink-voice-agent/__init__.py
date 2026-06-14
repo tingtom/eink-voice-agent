@@ -1,4 +1,5 @@
 from . import schemas, tools
+from .adapter import register as register_platform
 
 
 def register(ctx):
@@ -26,3 +27,5 @@ def register(ctx):
         schema=schemas.CI_STATUS,
         handler=tools.ci_status,
     )
+
+    register_platform(ctx)

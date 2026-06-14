@@ -29,7 +29,7 @@ idf.py -p /dev/ttyUSB0 flash monitor
 hermes plugins install /root/eink-voice-agent/.hermes/plugins/eink-voice-agent
 ```
 
-Provides tools: `build_firmware`, `flash_firmware`, `monitor_device`, `ci_status`.
+Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for device conversations) and tools: `build_firmware`, `flash_firmware`, `monitor_device`, `ci_status`.
 
 ## Key Decisions
 - ES8311 audio codec (I2C+I2S) on Waveshare ESP32-C6-ePaper-1.54 — pin mapping in `app_config.h` needs verification against schematic
