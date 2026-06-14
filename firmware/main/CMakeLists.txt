@@ -19,6 +19,7 @@ idf_component_register(
         "network/http_client.c"
         "modes/mode_voice_agent.c"
         "modes/mode_note.c"
+        "modes/mode_todo.c"
         "modes/mode_transcribe.c"
         "modes/mode_games.c"
         "modes/mode_dashboard.c"

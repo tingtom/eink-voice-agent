@@ -19,13 +19,16 @@ void mode_transcribe_start(void)
 void mode_transcribe_stop(void)
 {
     ESP_LOGI(TAG, "Transcribe mode stopped");
-    active = false;
     audio_pipeline_stop_recording();
-    ui_show_home_screen();
+    audio_pipeline_send_end_recording();
+    ui_show_processing_screen();
+    audio_pipeline_start_processing();
+    active = false;
 }
 
-void mode_transcribe_handle_result(const char *text)
+void mode_transcribe_handle_response(const char *text)
 {
     if (!active) return;
+    audio_pipeline_stop_processing();
     ui_show_response(text);
 }

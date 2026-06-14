@@ -47,7 +47,9 @@ static void audio_capture_task(void *arg)
                 if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                     ringbuffer_write(&audio_rb, buf, read);
                 }
-                ws_client_send_audio((uint8_t *)buf, read * sizeof(int16_t));
+                const char *mode_str[] = {"agent", "note", "transcribe"};
+                ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
+                                          mode_str[current_mode]);
 
                 int64_t now = esp_timer_get_time();
                 if (now - last_ui > UI_UPDATE_INTERVAL_US) {
@@ -213,6 +215,22 @@ void audio_pipeline_start_processing(void)
 void audio_pipeline_stop_processing(void)
 {
     processing = false;
+}
+
+void audio_pipeline_send_end_recording(void)
+{
+    const char *mode_str[] = {"agent", "note", "transcribe"};
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+             "{\"type\":\"end\",\"mode\":\"%s\",\"session_id\":\"\"}",
+             mode_str[current_mode]);
+    ws_client_send_json(msg);
+    ESP_LOGI(TAG, "End of recording sent (mode=%s)", mode_str[current_mode]);
+}
+
+audio_mode_t audio_pipeline_get_current_mode(void)
+{
+    return current_mode;
 }
 
 void audio_pipeline_play_tts(const uint8_t *audio, size_t len)

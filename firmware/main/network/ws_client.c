@@ -89,6 +89,17 @@ esp_err_t ws_client_init(const char *url, const char *token)
 
 esp_err_t ws_client_send_audio(const uint8_t *data, size_t len)
 {
+    return ws_client_send_audio_mode(data, len, NULL);
+}
+
+esp_err_t ws_client_send_json(const char *json_str)
+{
+    if (!connected) return ESP_FAIL;
+    return esp_websocket_client_send_text(client, json_str, strlen(json_str), portMAX_DELAY);
+}
+
+esp_err_t ws_client_send_audio_mode(const uint8_t *data, size_t len, const char *mode)
+{
     if (!connected) return ESP_FAIL;
 
     size_t b64_len = ((len + 2) / 3) * 4 + 256;
@@ -97,7 +108,8 @@ esp_err_t ws_client_send_audio(const uint8_t *data, size_t len)
 
     size_t encoded = base64_encode(data, len, payload + 128, b64_len - 128);
     size_t hdr_len = snprintf(payload, 128,
-                              "{\"type\":\"audio\",\"session_id\":\"\",\"data\":\"");
+                              "{\"type\":\"audio\",\"mode\":\"%s\",\"session_id\":\"\",\"data\":\"",
+                              mode ? mode : "");
     payload[hdr_len + encoded] = '"';
     payload[hdr_len + encoded + 1] = '}';
     payload[hdr_len + encoded + 2] = '\0';

@@ -15,5 +15,7 @@ void audio_pipeline_start_recording(audio_mode_t mode);
 void audio_pipeline_stop_recording(void);
 void audio_pipeline_start_processing(void);
 void audio_pipeline_stop_processing(void);
+void audio_pipeline_send_end_recording(void);
 void audio_pipeline_play_tts(const uint8_t *audio, size_t len);
+audio_mode_t audio_pipeline_get_current_mode(void);
 bool audio_pipeline_is_recording(void);
