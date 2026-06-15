@@ -14,7 +14,7 @@
 #include "power_mgmt.h"
 #include "ringbuffer.h"
 #include "audio_pipeline.h"
-#include "offline_notes.h"
+#include "recordings.h"
 #include "ui_manager.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
@@ -47,7 +47,7 @@ static void audio_capture_task(void *arg)
             esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
             if (ret == ESP_OK && read > 0) {
                 if (offline_recording) {
-                    offline_note_write_audio(buf, read);
+                    recording_write_audio(buf, read);
                 } else {
                     if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                         ringbuffer_write(&audio_rb, buf, read);
@@ -250,15 +250,16 @@ bool audio_pipeline_is_recording(void)
     return recording;
 }
 
-bool audio_pipeline_start_offline_recording(void)
+bool audio_pipeline_start_offline_recording(rec_type_t type)
 {
     if (recording) return false;
-    if (!offline_note_start()) return false;
+    if (!recording_start(type)) return false;
     recording = true;
     offline_recording = true;
     processing = false;
     power_mark_activity();
-    ESP_LOGI(TAG, "Offline recording started");
+    ESP_LOGI(TAG, "Offline recording started (type=%s)",
+             type == REC_TYPE_NOTE ? "NOTE" : "TODO");
     return true;
 }
 
@@ -267,7 +268,7 @@ void audio_pipeline_stop_offline_recording(void)
     if (!recording || !offline_recording) return;
     recording = false;
     offline_recording = false;
-    offline_note_stop();
+    recording_stop();
     ESP_LOGI(TAG, "Offline recording stopped");
 }
 

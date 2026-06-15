@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "recordings.h"
 
 typedef enum {
     MODE_AGENT,
@@ -21,7 +22,7 @@ void audio_pipeline_play_tts(const uint8_t *audio, size_t len);
 audio_mode_t audio_pipeline_get_current_mode(void);
 bool audio_pipeline_is_recording(void);
 
-// Offline recording — writes audio to SPIFFS instead of WebSocket
-bool audio_pipeline_start_offline_recording(void);
+// Offline recording — writes audio to SD card instead of WebSocket
+bool audio_pipeline_start_offline_recording(rec_type_t type);
 void audio_pipeline_stop_offline_recording(void);
 bool audio_pipeline_is_offline_recording(void);
