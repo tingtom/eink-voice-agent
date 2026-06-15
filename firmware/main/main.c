@@ -26,7 +26,7 @@
 #include "mode_todo.h"
 #include "mode_dashboard.h"
 #include "mode_games.h"
-#include "offline_notes.h"
+#include "recordings.h"
 
 static const char *TAG = "MAIN";
 
@@ -127,13 +127,13 @@ static void enter_mode(app_mode_t mode)
                 current_sub = SUB_MENU;
                 return;
             }
-            if (offline_note_pending_sync_count() == 0) {
+            if (recording_pending_sync_count() == 0) {
                 ui_show_response("Nothing to sync!");
                 current_sub = SUB_RESPONSE;
                 return;
             }
             ui_show_processing_screen();
-            offline_note_sync_start();
+            recording_sync_start();
             break;
         default:
             break;
@@ -163,10 +163,10 @@ static void finish_current_mode(void)
 
 static void draw_note_list(void)
 {
-    int count = offline_note_count();
+    int count = recording_count();
     if (count == 0) {
         epaper_clear();
-        epaper_draw_text(10, 60, "No offline notes", 12);
+        epaper_draw_text(10, 60, "No offline recordings", 12);
         epaper_partial_refresh();
         return;
     }
@@ -175,51 +175,72 @@ static void draw_note_list(void)
     if (notes_sel >= count) notes_sel = count - 1;
 
     // Auto-scroll
-    int visible = (DISPLAY_HEIGHT - 30) / 14; // ~12 items
+    int visible = (DISPLAY_HEIGHT - 30) / 14;
     if (notes_sel < notes_list_offset) notes_list_offset = notes_sel;
     if (notes_sel >= notes_list_offset + visible)
         notes_list_offset = notes_sel - visible + 1;
 
     epaper_clear();
-    epaper_draw_text(4, 8, "Offline Notes", 12);
+    epaper_draw_text(4, 8, "Recordings", 12);
 
-    int y = 26;
+    uint32_t free_secs = recording_capacity_seconds();
+    char cap_line[24];
+    if (free_secs > 0) {
+        snprintf(cap_line, sizeof(cap_line), "~%lus free", (unsigned long)free_secs);
+        epaper_draw_text(4, 22, cap_line, 8);
+    }
+
+    int y = 36;
     for (int i = notes_list_offset; i < count && i < notes_list_offset + visible; i++) {
-        char synced = offline_note_is_synced(i) ? '*' : ' ';
-        char line[32];
+        recording_info_t info;
+        if (!recording_get_info(i, &info)) continue;
+
+        char icon;
+        switch (info.status) {
+            case REC_STATUS_RAW:         icon = 'o'; break;
+            case REC_STATUS_TRANSCRIBED: icon = 'T'; break;
+            case REC_STATUS_SYNCED:      icon = '*'; break;
+            default:                     icon = '?'; break;
+        }
+
+        char line[40];
+        const char *short_name = info.name + 4;
         if (i == notes_sel) {
-            char name[NOTE_NAME_LEN];
-            offline_note_get_name(i, name, sizeof(name));
-            snprintf(line, sizeof(line), ">%s %c", name + 5, synced);
+            snprintf(line, sizeof(line), ">%.11s %c", short_name, icon);
         } else {
-            char name[NOTE_NAME_LEN];
-            offline_note_get_name(i, name, sizeof(name));
-            snprintf(line, sizeof(line), " %s %c", name + 5, synced);
+            snprintf(line, sizeof(line), " %.11s %c", short_name, icon);
         }
         epaper_draw_text(8, y, line, 8);
         y += 14;
     }
 
-    epaper_draw_text(4, DISPLAY_HEIGHT - 14, "*=synced  SEL=play", 8);
+    epaper_draw_text(4, DISPLAY_HEIGHT - 14, "o=raw T=text *=done SEL=open", 8);
     epaper_partial_refresh();
 }
 
 static void draw_note_detail(int idx)
 {
-    char name[NOTE_NAME_LEN], text[NOTE_TEXT_MAX];
-    offline_note_get_name(idx, name, sizeof(name));
-    offline_note_get_text(idx, text, sizeof(text));
+    recording_info_t info;
+    if (!recording_get_info(idx, &info)) return;
 
     epaper_clear();
-    epaper_draw_text(4, 8, name, 12);
+    char title[32];
+    const char *type_str = (info.type == REC_TYPE_NOTE) ? "NOTE" : "TODO";
+    snprintf(title, sizeof(title), "%s (%s)", info.name, type_str);
+    epaper_draw_text(4, 8, title, 12);
 
-    if (offline_note_is_synced(idx)) {
-        epaper_draw_text(4, 24, text, 8);
-    } else {
-        epaper_draw_text(4, 30, "Not transcribed", 8);
+    if (info.status >= REC_STATUS_TRANSCRIBED) {
+        epaper_draw_text(4, 24, info.text, 8);
+    } else if (info.status == REC_STATUS_RAW) {
+        epaper_draw_text(4, 30, "[Not transcribed]", 8);
+        epaper_draw_text(4, 44, "Sync to transcribe", 8);
     }
 
-    epaper_draw_text(4, DISPLAY_HEIGHT - 14, "SEL=play  long=back", 8);
+    char dur[24];
+    snprintf(dur, sizeof(dur), "%lums", (unsigned long)info.duration_ms);
+    epaper_draw_text(4, DISPLAY_HEIGHT - 14, dur, 8);
+
+    epaper_draw_text(100, DISPLAY_HEIGHT - 14, "SEL=play long=del", 8);
     epaper_partial_refresh();
 }
 
@@ -243,7 +264,18 @@ static void handle_longpress(button_id_t btn)
         return;
     }
 
-    if (current_app_mode == APP_MODE_VIEW_NOTES || current_app_mode == APP_MODE_SYNC) {
+    if (current_app_mode == APP_MODE_VIEW_NOTES) {
+        if (current_sub == SUB_NOTE_DETAIL) {
+            // Long-press in detail = delete
+            recording_delete(notes_sel);
+            current_sub = SUB_NOTE_LIST;
+            draw_note_list();
+        } else {
+            return_home();
+        }
+        return;
+    }
+    if (current_app_mode == APP_MODE_SYNC) {
         return_home();
         return;
     }
@@ -291,7 +323,7 @@ static void handle_button(button_id_t btn)
     }
 
     if (current_app_mode == APP_MODE_VIEW_NOTES) {
-        int count = offline_note_count();
+        int count = recording_count();
         if (count == 0) { return_home(); return; }
 
         if (current_sub == SUB_NOTE_LIST) {
@@ -303,7 +335,7 @@ static void handle_button(button_id_t btn)
             }
         } else if (current_sub == SUB_NOTE_DETAIL) {
             if (btn == BUTTON_SELECT) {
-                offline_note_play(notes_sel);
+                recording_play(notes_sel);
                 draw_note_detail(notes_sel);
             } else if (btn == BUTTON_UP || btn == BUTTON_DOWN) {
                 current_sub = SUB_NOTE_LIST;
@@ -380,8 +412,7 @@ static void handle_ws_message(const char *data, size_t len)
     text[text_len] = '\0';
 
     // Route to sync handler when syncing
-    if (offline_note_sync_is_busy()) {
-        // Find session_id if present
+    if (recording_sync_is_busy()) {
         const char *sid_key = "\"session_id\":\"";
         const char *sid_start = strstr(data, sid_key);
         if (sid_start) {
@@ -389,14 +420,11 @@ static void handle_ws_message(const char *data, size_t len)
             const char *sid_end = strchr(sid_start, '"');
             if (sid_end) {
                 size_t sid_len = sid_end - sid_start;
-                // Session IDs for sync notes are "sync_note_XXXXX"
                 char *sid = malloc(sid_len + 1);
                 if (sid) {
                     memcpy(sid, sid_start, sid_len);
                     sid[sid_len] = '\0';
-                    // The offline_notes module handles it
-                    extern void offline_note_sync_handle_response(const char *session, const char *txt);
-                    offline_note_sync_handle_response(sid, text);
+                    recording_sync_handle_response(sid, text);
                     free(sid);
                 }
             }
@@ -483,7 +511,7 @@ void app_main(void)
     system_init();
     epaper_init();
     ui_init();
-    offline_notes_init();
+    recordings_init();
 
     if (!wifi_has_saved_creds()) {
         ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");

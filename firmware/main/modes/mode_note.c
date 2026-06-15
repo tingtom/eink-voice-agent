@@ -3,8 +3,8 @@
 #include "mode_note.h"
 #include "esp_log.h"
 #include "audio_pipeline.h"
+#include "recordings.h"
 #include "wifi_manager.h"
-#include "offline_notes.h"
 #include "ui_manager.h"
 
 static const char *TAG = "MODE_NOTE";
@@ -22,7 +22,7 @@ void mode_note_start(void)
         audio_pipeline_start_recording(MODE_NOTE);
     } else {
         is_offline = true;
-        audio_pipeline_start_offline_recording();
+        audio_pipeline_start_offline_recording(REC_TYPE_NOTE);
     }
 }
 
