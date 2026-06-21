@@ -9,6 +9,7 @@ static const char *TAG = "UI";
 static char status_text[32] = {0};
 static bool wifi_ok = false;
 static uint8_t battery = 0;
+static bool driving_mode = false;
 
 static void draw_wifi_icon(int x, int y, bool connected)
 {
@@ -30,8 +31,14 @@ static void draw_battery_icon(int x, int y, int pct)
 
 static void draw_status_bar(void)
 {
-    draw_wifi_icon(2, 2, wifi_ok);
-    epaper_draw_text(16, 1, status_text, 8);
+    int x = 2;
+    draw_wifi_icon(x, 2, wifi_ok);
+    x += 16;
+    if (driving_mode) {
+        epaper_draw_text(x, 1, "[D]", 8);
+        x += 20;
+    }
+    epaper_draw_text(x, 1, status_text, 8);
     draw_battery_icon(DISPLAY_WIDTH - 52, 2, battery);
     char pct[8];
     snprintf(pct, sizeof(pct), "%d%%", battery);
@@ -144,6 +151,56 @@ void ui_show_error(const char *message)
     epaper_draw_text(10, 60, "Error:", 16);
     epaper_draw_text(10, 80, message, 12);
     epaper_full_refresh();
+}
+
+static void draw_car_icon(int x, int y)
+{
+    // Body
+    epaper_draw_rect(x + 4, y + 8, 28, 10, 1);
+    // Roof
+    epaper_draw_rect(x + 10, y + 2, 16, 6, 1);
+    // Windows
+    epaper_draw_rect(x + 12, y + 4, 5, 3, 0);
+    epaper_draw_rect(x + 19, y + 4, 5, 3, 0);
+    // Wheels
+    epaper_draw_rect(x + 6, y + 18, 5, 3, 1);
+    epaper_draw_rect(x + 25, y + 18, 5, 3, 1);
+}
+
+static void draw_charging_bolt(int x, int y)
+{
+    epaper_draw_line(x + 4, y, x + 1, y + 10);
+    epaper_draw_line(x + 1, y + 10, x + 6, y + 10);
+    epaper_draw_line(x + 6, y + 10, x + 2, y + 20);
+    epaper_draw_line(x + 2, y + 20, x + 7, y + 10);
+    epaper_draw_line(x + 7, y + 10, x + 2, y + 10);
+    epaper_draw_line(x + 2, y + 10, x + 5, y);
+}
+
+void ui_show_docked_screen(void)
+{
+    epaper_clear();
+    draw_charging_bolt(DISPLAY_WIDTH / 2 - 4, 50);
+    epaper_draw_text(DISPLAY_WIDTH / 2 - 50, 80, "Sleeping & Charging", 12);
+    char pct[8];
+    snprintf(pct, sizeof(pct), "%d%%", battery);
+    epaper_draw_text(DISPLAY_WIDTH / 2 - 12, 100, pct, 16);
+    epaper_full_refresh();
+}
+
+void ui_show_driving_screen(void)
+{
+    epaper_clear();
+    draw_car_icon(DISPLAY_WIDTH / 2 - 18, 16);
+    epaper_draw_text(DISPLAY_WIDTH / 2 - 36, 44, "Driving Mode", 12);
+    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=exit", 8);
+    draw_status_bar();
+    epaper_partial_refresh();
+}
+
+void ui_set_driving_mode(bool enabled)
+{
+    driving_mode = enabled;
 }
 
 static void draw_moon_icon(int x, int y)

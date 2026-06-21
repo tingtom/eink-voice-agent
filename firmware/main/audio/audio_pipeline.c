@@ -24,6 +24,7 @@ static bool recording = false;
 static bool processing = false;
 static audio_mode_t current_mode = MODE_AGENT;
 static bool offline_recording = false;
+static bool pipeline_docked = false;
 
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
@@ -96,7 +97,7 @@ static void vad_task(void *arg)
     bool in_vad_trigger = false;
 
     while (1) {
-        if (recording) {
+        if (recording || pipeline_docked) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
@@ -140,6 +141,11 @@ static void wake_word_task(void *arg)
     int wake_word_checks = 0;
 
     while (1) {
+        if (pipeline_docked) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         bits = xEventGroupWaitBits(audio_events, AUDIO_EVENT_VAD_TRIGGERED,
                                    pdTRUE, pdFALSE, portMAX_DELAY);
 
@@ -275,4 +281,10 @@ void audio_pipeline_stop_offline_recording(void)
 bool audio_pipeline_is_offline_recording(void)
 {
     return offline_recording;
+}
+
+void audio_pipeline_set_docked(bool docked)
+{
+    pipeline_docked = docked;
+    ESP_LOGI(TAG, "Docked mode %s", docked ? "enabled" : "disabled");
 }

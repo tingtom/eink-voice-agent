@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import subprocess
+from datetime import datetime, timezone
+from typing import Any, Dict
 from pathlib import Path
 
 from gateway.platforms.base import (
@@ -17,10 +19,31 @@ logger = logging.getLogger(__name__)
 
 NOTES_DIR = Path.home() / ".eink-voice-agent" / "notes"
 TODOS_FILE = Path.home() / ".eink-voice-agent" / "todos.json"
+ACTIVITY_LOG = Path.home() / ".eink-voice-agent" / "activity.jsonl"
+TELEMETRY_FILE = Path.home() / ".eink-voice-agent" / "telemetry.json"
 
 
 def _ensure_dirs():
     NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    ACTIVITY_LOG.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _log_activity(entry: dict):
+    entry["ts"] = datetime.now(timezone.utc).isoformat()
+    try:
+        with open(ACTIVITY_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        lines = ACTIVITY_LOG.read_text().splitlines()
+        if len(lines) > 2000:
+            ACTIVITY_LOG.write_text("\n".join(lines[-1500:]) + "\n")
+    except Exception as e:
+        logger.warning("Failed to write activity log: %s", e)
+
+
+def _save_telemetry(data: dict):
+    TELEMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    TELEMETRY_FILE.write_text(json.dumps(data, indent=2))
 
 
 def _load_todos():
@@ -119,6 +142,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                     self._ws_by_chat[chat_id] = ws
                     logger.info("Device '%s' authenticated", device_id)
                     await ws.send(json.dumps({"type": "auth_ok"}))
+                    _log_activity({"type": "connect", "detail": f"Device '{device_id}' connected"})
 
                 elif msg_type == "audio":
                     if not chat_id:
@@ -145,6 +169,9 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                         )
                         note_file = NOTES_DIR / f"note_{timestamp}.txt"
                         note_file.write_text(text)
+                        _log_activity({"type": "message", "direction": "in",
+                                       "content": f"[voice note] {text[:500]}".strip(),
+                                       "session_id": session})
                         reply = (
                             f"Transcribed note saved:\n\n{text[:180]}"
                         )
@@ -185,12 +212,15 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                     if not chat_id:
                         continue
                     session = msg.get("session_id", chat_id)
+                    content = msg.get("data", "")
+                    _log_activity({"type": "message", "direction": "in",
+                                   "content": content[:500], "session_id": session})
                     source = self.build_source(
                         chat_id=chat_id, chat_name=f"Device-{device_id}",
                         chat_type="dm", user_id=device_id, user_name=device_id,
                     )
                     event = MessageEvent(
-                        text=msg.get("data", ""),
+                        text=content,
                         message_type=MessageType.TEXT,
                         source=source,
                         message_id=session,
@@ -200,11 +230,24 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                 elif msg_type == "ping":
                     await ws.send(json.dumps({"type": "pong"}))
 
+                elif msg_type == "telemetry":
+                    if not chat_id:
+                        continue
+                    telemetry = {k: v for k, v in msg.items() if k not in ("type",)}
+                    _save_telemetry(telemetry)
+                    _log_activity({
+                        "type": "telemetry",
+                        "detail": "battery={}% wifi={}dBm".format(
+                            telemetry.get("battery", "?"), telemetry.get("wifi_rssi", "?")
+                        ),
+                    })
+
         except Exception:
             logger.info("Device '%s' disconnected", device_id or "unknown")
         finally:
             if chat_id:
                 self._ws_by_chat.pop(chat_id, None)
+                _log_activity({"type": "disconnect", "detail": f"Device '{device_id}' disconnected"})
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
         ws = self._ws_by_chat.get(chat_id)
@@ -212,9 +255,14 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             return SendResult(success=False, message_id="")
         try:
             await ws.send(json.dumps({"type": "response", "data": content}))
+            _log_activity({"type": "message", "direction": "out",
+                           "content": content[:500], "session_id": chat_id})
         except Exception:
             return SendResult(success=False, message_id="")
         return SendResult(success=True, message_id="")
+
+    async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
+        return {"name": chat_id, "type": "dm"}
 
 
 # ── Todo tools ─────────────────────────────────────────────────

@@ -57,6 +57,8 @@ typedef enum {
 static app_mode_t current_app_mode = APP_MODE_HOME;
 static sub_state_t current_sub = SUB_MENU;
 static int menu_selection = 0;
+static bool driving_mode = false;
+static bool was_charging = false;
 
 // View notes state
 static int notes_list_offset = 0;
@@ -250,6 +252,20 @@ static void handle_longpress(button_id_t btn)
 {
     (void)btn;
 
+    if (driving_mode) {
+        ESP_LOGI(TAG, "Exiting driving mode");
+        driving_mode = false;
+        ui_set_driving_mode(false);
+        audio_pipeline_set_docked(power_is_charging());
+        if (current_sub == SUB_RECORDING) {
+            audio_pipeline_stop_recording();
+            audio_pipeline_stop_offline_recording();
+        }
+        finish_current_mode();
+        return_home();
+        return;
+    }
+
     if (current_app_mode == APP_MODE_HOME) {
         ESP_LOGI(TAG, "Going to sleep from menu");
         ui_show_sleep_screen();
@@ -301,6 +317,19 @@ static void handle_longpress(button_id_t btn)
 
 static void handle_button(button_id_t btn)
 {
+    // If docked, any button wakes into driving mode
+    if (power_is_charging() && !driving_mode) {
+        ESP_LOGI(TAG, "Waking from docked, entering driving mode");
+        driving_mode = true;
+        ui_set_driving_mode(true);
+        audio_pipeline_set_docked(false);
+        current_app_mode = APP_MODE_VOICE_AGENT;
+        current_sub = SUB_RECORDING;
+        mode_voice_agent_start();
+        ui_show_driving_screen();
+        return;
+    }
+
     if (current_app_mode == APP_MODE_HOME) {
         if (btn == BUTTON_UP && menu_selection > 0) {
             menu_selection--;
@@ -377,8 +406,17 @@ static void handle_button(button_id_t btn)
 
     if (current_sub == SUB_RESPONSE) {
         if (btn == BUTTON_SELECT) {
-            finish_current_mode();
-            return_home();
+            if (driving_mode) {
+                // Loop back to listening
+                ESP_LOGI(TAG, "Driving mode loop: restarting voice agent");
+                audio_pipeline_stop_processing();
+                mode_voice_agent_start();
+                ui_show_driving_screen();
+                current_sub = SUB_RECORDING;
+            } else {
+                finish_current_mode();
+                return_home();
+            }
         }
         return;
     }
@@ -559,6 +597,14 @@ void app_main(void)
     buttons_init();
     ui_show_home_screen();
 
+    // If already charging at boot, enter docked state
+    if (power_is_charging()) {
+        ESP_LOGI(TAG, "Already charging at boot, entering docked state");
+        was_charging = true;
+        audio_pipeline_set_docked(true);
+        ui_show_docked_screen();
+    }
+
     ESP_LOGI(TAG, "Initialization complete, entering main loop");
 
     while (1) {
@@ -566,7 +612,36 @@ void app_main(void)
         ui_update_battery(battery);
         ui_update_wifi_status(wifi_is_connected());
 
-        if (power_should_sleep()) {
+        // ── Charging state transitions ──────────────────────
+        bool now_charging = power_is_charging();
+
+        if (!now_charging && driving_mode) {
+            driving_mode = false;
+            ui_set_driving_mode(false);
+        }
+
+        if (now_charging != was_charging) {
+            if (now_charging) {
+                ESP_LOGI(TAG, "Charging detected");
+                if (current_app_mode == APP_MODE_HOME && current_sub == SUB_MENU) {
+                    driving_mode = false;
+                    ui_set_driving_mode(false);
+                    audio_pipeline_set_docked(true);
+                    ui_show_docked_screen();
+                }
+            } else {
+                ESP_LOGI(TAG, "Charging disconnected");
+                audio_pipeline_set_docked(false);
+                if (current_app_mode == APP_MODE_HOME) {
+                    return_home();
+                }
+            }
+            was_charging = now_charging;
+        }
+
+        // Skip sleep timer when docked (on USB power)
+        bool docked = now_charging && !driving_mode;
+        if (!docked && power_should_sleep()) {
             ESP_LOGI(TAG, "Entering deep sleep...");
             ui_show_sleep_screen();
             vTaskDelay(pdMS_TO_TICKS(100));
