@@ -7,6 +7,8 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "app_config.h"
 #include "epaper_driver.h"
 #include "mic_driver.h"
@@ -16,6 +18,7 @@ static const char *TAG = "POWER";
 static int64_t last_activity_time = 0;
 static bool initialized = false;
 static adc_oneshot_unit_handle_t adc_handle = NULL;
+static int32_t wake_count = 0;
 
 void power_init(void)
 {
@@ -32,7 +35,17 @@ void power_init(void)
 
     last_activity_time = esp_timer_get_time();
     initialized = true;
-    ESP_LOGI(TAG, "Power management initialized");
+
+    // Wake count — persist across deep sleep
+    nvs_handle_t nvs;
+    if (nvs_open("system", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_get_i32(nvs, "wake_count", &wake_count);
+        wake_count++;
+        nvs_set_i32(nvs, "wake_count", wake_count);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    ESP_LOGI(TAG, "Power management initialized (wake #%" PRId32 ")", wake_count);
 }
 
 static int read_battery_mv(void)
@@ -54,6 +67,11 @@ uint8_t power_get_battery_pct(void)
 bool power_is_charging(void)
 {
     return gpio_get_level(CHARGE_STATUS_GPIO) == 0;
+}
+
+int32_t power_get_wake_count(void)
+{
+    return wake_count;
 }
 
 bool power_should_sleep(void)

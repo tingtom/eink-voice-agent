@@ -1,3 +1,4 @@
 dependencies:
   tuanpmt/esp_epaper: "^1.0.4"
   espressif/esp_websocket_client: "^1.0.0"
+  espressif/mdns: "^1.5.3"

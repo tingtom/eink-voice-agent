@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 
 #include "app_config.h"
 #include "nvs_flash.h"
@@ -27,6 +29,8 @@
 #include "mode_dashboard.h"
 #include "mode_games.h"
 #include "recordings.h"
+#include "sdcard.h"
+#include "mdns.h"
 
 static const char *TAG = "MAIN";
 
@@ -579,6 +583,16 @@ void app_main(void)
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "WiFi connected");
         ui_update_status_bar(true, power_get_battery_pct());
+
+        // mDNS advertisement
+        ESP_ERROR_CHECK(mdns_init());
+        ESP_ERROR_CHECK(mdns_hostname_set(DEVICE_NAME));
+        ESP_ERROR_CHECK(mdns_instance_name_set("EInk Voice Agent"));
+        mdns_service_add("eink-voice-http", "_http", "_tcp", 80, NULL, 0);
+        mdns_service_add("eink-voice-agent", "_eink-voice-agent", "_tcp", 0, NULL, 0);
+        mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "device_type", "eink_voice_agent");
+        mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "version", "1.0");
+        ESP_LOGI(TAG, "mDNS started — device available as %s.local", DEVICE_NAME);
     } else {
         ESP_LOGW(TAG, "WiFi connection failed, starting provisioning");
         provisioning_start_ap();
@@ -606,6 +620,8 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "Initialization complete, entering main loop");
+
+    int telemetry_ticks = 0;
 
     while (1) {
         uint8_t battery = power_get_battery_pct();
@@ -637,6 +653,46 @@ void app_main(void)
                 }
             }
             was_charging = now_charging;
+            telemetry_ticks = 6; // Send telemetry immediately on state change
+        }
+
+        // ── Periodic telemetry + mDNS TXT update (every ~30s) ──
+        telemetry_ticks++;
+        if (telemetry_ticks >= 6 && ws_client_is_connected()) {
+            telemetry_ticks = 0;
+
+            uint8_t bat = power_get_battery_pct();
+            bool chg = power_is_charging();
+            int8_t rssi = wifi_get_rssi();
+            int64_t uptime_s = esp_timer_get_time() / 1000000;
+            int32_t wc = power_get_wake_count();
+            uint64_t free_kb = sdcard_get_free_bytes() / 1024;
+            uint32_t cap_sec = recording_capacity_seconds();
+
+            char json[256];
+            snprintf(json, sizeof(json),
+                "{"
+                "\"type\":\"telemetry\","
+                "\"battery\":%u,"
+                "\"charging\":%s,"
+                "\"wifi_rssi\":%d,"
+                "\"uptime\":%" PRIu64 ","
+                "\"wake_count\":%" PRId32 ","
+                "\"storage_free_kb\":%" PRIu64 ","
+                "\"recording_time_remaining_sec\":%" PRIu32
+                "}",
+                (unsigned)bat, chg ? "true" : "false", (int)rssi,
+                (uint64_t)uptime_s, wc, free_kb, cap_sec);
+            ws_client_send_json(json);
+
+            // Update mDNS TXT records with live values
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%u", bat);
+            mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "battery", buf);
+            snprintf(buf, sizeof(buf), "%s", chg ? "true" : "false");
+            mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "charging", buf);
+            snprintf(buf, sizeof(buf), "%d", rssi);
+            mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "wifi_rssi", buf);
         }
 
         // Skip sleep timer when docked (on USB power)
