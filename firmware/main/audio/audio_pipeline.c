@@ -29,11 +29,6 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 static bool wake_word_checking = false;
 
-// Playback test buffer — accumulates audio during recording for speaker loopback
-#define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE / 4)  // 0.25s loopback buffer (8KB @16kHz)
-static int16_t *playback_buf = NULL;
-static size_t playback_len = 0;
-
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
 #define AUDIO_EVENT_WAKE_WORD      BIT1
@@ -60,14 +55,6 @@ static void audio_capture_task(void *arg)
                 } else {
                     if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                         ringbuffer_write(&audio_rb, buf, read);
-                    }
-                    if (playback_buf) {
-                        size_t room = PLAYBACK_BUF_MAX_SAMPLES - playback_len;
-                        size_t copy = read < room ? read : room;
-                        if (copy > 0) {
-                            memcpy(playback_buf + playback_len, buf, copy * sizeof(int16_t));
-                            playback_len += copy;
-                        }
                     }
                     const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
                     ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
@@ -263,11 +250,6 @@ void audio_pipeline_init(void)
     xTaskCreate(anim_task, "anim", 2048, NULL, 3, NULL);
     xTaskCreate(vad_task, "vad", 3072, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
-    playback_buf = (int16_t *)calloc(PLAYBACK_BUF_MAX_SAMPLES, sizeof(int16_t));
-    if (!playback_buf) {
-        ESP_LOGE(TAG, "Failed to allocate playback buffer (%zu bytes)",
-                 PLAYBACK_BUF_MAX_SAMPLES * sizeof(int16_t));
-    }
     mic_start();
     ESP_LOGI(TAG, "Audio pipeline initialized (two-stage VAD + wake word)");
 }
@@ -282,40 +264,11 @@ void audio_pipeline_start_recording(audio_mode_t mode)
     ESP_LOGI(TAG, "Recording started (mode=%d)", mode);
 }
 
-struct playback_arg {
-    int16_t *buf;
-    size_t len;
-};
-
-static void playback_task(void *arg)
-{
-    struct playback_arg *pa = (struct playback_arg *)arg;
-    speaker_play(pa->buf, pa->len);
-    free(pa->buf);
-    free(pa);
-    vTaskDelete(NULL);
-}
-
 void audio_pipeline_stop_recording(void)
 {
     if (!recording) return;
     recording = false;
     vad_reset();
-    if (playback_buf && playback_len > 0) {
-        int16_t *copy = malloc(playback_len * sizeof(int16_t));
-        if (copy) {
-            memcpy(copy, playback_buf, playback_len * sizeof(int16_t));
-            struct playback_arg *pa = malloc(sizeof(struct playback_arg));
-            if (pa) {
-                pa->buf = copy;
-                pa->len = playback_len;
-                xTaskCreate(playback_task, "playback", 4096, pa, 5, NULL);
-            } else {
-                free(copy);
-            }
-        }
-        playback_len = 0;
-    }
     ESP_LOGI(TAG, "Recording stopped");
 }
 
