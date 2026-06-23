@@ -34,5 +34,68 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 ## Key Decisions
 - ES8311 audio codec (I2C+I2S) on Waveshare ESP32-C6-ePaper-1.54 — pin mapping in `app_config.h` needs verification against schematic
 - ULP RISC-V removed — not available in IDF v5.3 for ESP32-C6; uses timer+GPIO deep sleep instead
-- Wake word stub in `audio/wake_word.c` — needs Edge Impulse TFLite model trained and loaded
 - e-paper uses `tuanpmt/esp_epaper` framebuffer + 5×7 bitmap font (no LVGL UI)
+- **MFE is NOT in-graph**: TFLite model input shape is [1, 3960] (99 frames × 40 mel bins), not 16000 raw PCM. MFE extraction runs separately in C before inference
+- Model uses `espressif/esp-tflite-micro` + `espressif/esp-nn` from ESP registry
+
+## Goal
+- Integrate Edge Impulse wake word model into the eink-voice-agent firmware
+
+## Constraints & Preferences
+- Edge Impulse model is a trigger word model (`"hi_jeff"`/`"noise"`/`"unknown"`) using MobileNetV2 0.35 (int8 quantized TFLite)
+- MFE extracted separately: 99 frames × 40 filters from 16000 PCM at 16kHz (20ms frame, 10ms stride)
+- TFLite model takes 3960 int8 features as input (scale=0.00390625, zp=-128)
+- ESP32-C6 has no PSRAM support; model stored in flash (615KB C array), 162KB arena from heap (DRAM)
+- ESP-IDF v6.0.1 is the build environment
+
+## Progress
+### Done
+- WebSocket disconnect fix: Hermes adapter processes audio in `asyncio.create_task` background coroutine
+- I2S audio capture fix: TX channel enabled permanently at init
+- Button wake from deep sleep: `esp_sleep_enable_ext1_wakeup` (GPIO2 only)
+- Boot loop fix: playback buffer reduced to 3s, DMA frame clamped to 2046
+- Firmware: WS reconnect watchdog every 5s in main loop
+- **TFLite Micro integration**: `wake_word.cpp` rewritten with 16000-sample buffer, MFE preprocessing (256-point FFT, Mel filterbank, log-compression), and TFLite inference
+- Precomputed MFE tables: Hann window (256), Mel filterbank (40 × 129)
+- Model binary (615KB) converted to C array in `models/tflite_learn_1037720_5.c`
+- Dependencies added: `espressif/esp-tflite-micro` v1.3.7, `espressif/esp-nn` v1.2.3
+- Build verified: firmware compiles successfully
+
+### In Progress
+- (none)
+
+### Blocked
+- (none)
+
+## Key Decisions
+- Implemented MFE in C (256-point FFT, Hann window, Mel filterbank, log compression) — no edge-impulse-sdk needed
+- Model stored as C array (xxd-style) — no INCBIN dependency
+- 7 TFLite ops registered: Reshape, Conv2D, DepthwiseConv2D, Add, FullyConnected, Softmax, Mean
+- File renamed `wake_word.c` → `wake_word.cpp` (needs C++ for TFLite Micro API)
+
+## Next Steps
+1. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
+2. **Test with real audio**: Flash to hardware and test wake word detection with actual microphone input
+3. **Optimize inference speed**: MFE + FFT runs on ESP32-C6 FPU; if too slow, consider reducing FFT frame count or optimizing FFT with precomputed twiddle factors
+
+## Critical Context
+- Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
+- Model output tensor: `StatefulPartitionedCall:0` int8 [1, 3], scale=0.00390625, zp=-128
+- Arena size: 162284 bytes (from heap DRAM)
+- Audio pipeline feeds 800-sample chunks; wake_word.cpp buffers internally to 16000
+- MFE parameters: 20ms frame (320 samples), 10ms stride (160 samples), 40 mel filters, 256-pt FFT, noise floor -52 dB
+- Classes: "hi_jeff" (index 0), "noise" (1), "unknown" (2) — sensitivity threshold 0.7
+
+## Relevant Files
+- `firmware/main/audio/wake_word.cpp` — MFE + TFLite Micro inference (16000-sample buffer)
+- `firmware/main/audio/wake_word.h` — C API header with extern "C"
+- `firmware/main/models/tflite_learn_1037720_5.c` — model binary as C array (615KB)
+- `firmware/main/models/tflite_learn_1037720_5.h` — model header with arena size
+- `firmware/main/models/model_mfe.h` — precomputed Hann window + Mel filterbank (116KB)
+- `firmware/main/models/model_metadata.h` — input/output sizes and class indices
+- `firmware/main/models/model_ops.h` — TFLite Micro op resolver setup
+- `firmware/main/idf_component.yml` — dependencies
+- `firmware/main/CMakeLists.txt` — build config (includes models dir, wake_word.cpp)
+- `firmware/main/audio/audio_pipeline.c` — existing pipeline (no changes needed)
+- `model/tflite-model/` — Edge Impulse exported model files (original)
+- `model/model-parameters/` — Edge Impulse metadata (for reference)

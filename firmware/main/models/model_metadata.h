@@ -1,0 +1,7 @@
+#pragma once
+
+#define WAKE_WORD_MODEL_INPUT_SIZE   3960
+#define WAKE_WORD_MODEL_OUTPUT_COUNT 3
+#define WAKE_WORD_LABEL_HI_JEFF      0
+#define WAKE_WORD_LABEL_NOISE        1
+#define WAKE_WORD_LABEL_UNKNOWN      2

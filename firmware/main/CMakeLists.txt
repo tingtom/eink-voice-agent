@@ -7,7 +7,7 @@ idf_component_register(
         "system/power_mgmt.c"
         "audio/mic_driver.c"
         "audio/audio_pipeline.c"
-        "audio/wake_word.c"
+        "audio/wake_word.cpp"
         "audio/speaker_driver.c"
         "audio/es8311.c"
         "audio/vad.c"
@@ -28,6 +28,7 @@ idf_component_register(
         "storage/recordings.c"
         "utils/ringbuffer.c"
         "utils/base64.c"
+        "models/tflite_learn_1037720_5.c"
     INCLUDE_DIRS
         "."
         "audio"
@@ -38,6 +39,7 @@ idf_component_register(
         "utils"
         "modes"
         "storage"
+        "models"
     REQUIRES
         esp_wifi
         esp_http_client

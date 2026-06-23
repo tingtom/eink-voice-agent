@@ -200,7 +200,7 @@ static void wake_word_task(void *arg)
 static void audio_i2s_duplex_init(void)
 {
     int dma_frames = AUDIO_BUFFER_SIZE;
-    if (dma_frames > 2046) dma_frames = 2046;
+    if (dma_frames > 1024) dma_frames = 1024;
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
@@ -251,6 +251,7 @@ void audio_pipeline_init(void)
 {
     ringbuffer_init(&audio_rb, AUDIO_BUFFER_SIZE * 4);
     audio_i2s_duplex_init();
+    ESP_ERROR_CHECK(speaker_enable());       // start TX clock (MCLK) before ES8311 init
     ESP_ERROR_CHECK(es8311_init());
     wake_word_init();
     vad_init();
@@ -261,8 +262,6 @@ void audio_pipeline_init(void)
     xTaskCreate(anim_task, "anim", 2048, NULL, 3, NULL);
     xTaskCreate(vad_task, "vad", 3072, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
-
-    ESP_ERROR_CHECK(speaker_enable());
     playback_buf = (int16_t *)calloc(PLAYBACK_BUF_MAX_SAMPLES, sizeof(int16_t));
     if (!playback_buf) {
         ESP_LOGE(TAG, "Failed to allocate playback buffer (%zu bytes)",

@@ -48,7 +48,7 @@ static const reg_cfg init_seq[] = {
     {0x31, 0x08},   // LDO D2A enable
     {0x30, 0x00},   // LDO control
     {0x29, 0x64},   // ADC/DAC bias current
-    {0x2A, 0x70},   // MIC_LDO enable, MIC bias on
+    {0x2A, 0x74},   // MIC_LDO enable, MIC bias on (bit 2=MICBIAS_EN)
 
     // Power on all analog stages
     {0x2B, 0x14},   // Output stage power
@@ -60,8 +60,8 @@ static const reg_cfg init_seq[] = {
     {0x02, 0x10},   // FS_SEL=001 (16kHz at MCLK/LRCK=256)
     {0x03, 0x04},   // CKM auto clock detection
 
-    // ADC input path — single-ended MIC1, 16-bit left-justified
-    {0x04, 0x3A},   // PGA enable, +18dB, MIC1 single-ended with MICBIAS
+    // ADC input path — single-ended MIC1, 16-bit left-justified, +18dB PGA
+    {0x04, 0x06},   // INPUT_SEL=00(MIC1), PGA_GAIN=11(+18dB)
     {0x05, 0x00},   // ADC digital volume = 0dB
     {0x06, 0x70},   // Left-justified, 16-bit
 
