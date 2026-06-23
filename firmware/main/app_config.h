@@ -60,7 +60,7 @@
 #define AUDIO_CHANNELS      1
 
 // ── Voice Activity Detection ─────────────────────────────────
-#define AUDIO_VAD_THRESHOLD         3000
+#define AUDIO_VAD_THRESHOLD         500
 #define AUDIO_VAD_HANGOVER_MS       400
 #define AUDIO_MAX_WAKE_WORD_CHECKS  40
 
