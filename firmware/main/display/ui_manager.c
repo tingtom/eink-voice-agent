@@ -10,7 +10,7 @@ static char status_text[32] = {0};
 static bool wifi_ok = false;
 static bool hermes_ok = false;
 static uint8_t battery = 0;
-static bool driving_mode = false;
+
 
 static void draw_wifi_icon(int x, int y, bool connected)
 {
@@ -68,10 +68,6 @@ static void draw_status_bar(void)
     x += 16;
     draw_hermes_icon(x, 2, hermes_ok);
     x += 12;
-    if (driving_mode) {
-        epaper_draw_text(x, 1, "[D]", 8);
-        x += 20;
-    }
     epaper_draw_text(x, 1, status_text, 8);
     draw_battery_icon(DISPLAY_WIDTH - 52, 2, battery);
     char pct[8];
@@ -128,7 +124,7 @@ void ui_show_recording_screen(void)
 {
     epaper_clear();
     int tw = epaper_text_width("Listening...", 16);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 35, "Listening...", 16);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Listening...", 16);
     epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=cancel", 8);
     draw_status_bar();
     epaper_partial_refresh();
@@ -143,8 +139,8 @@ void ui_update_recording_viz(int32_t energy)
     int gap = 2;
     int total_w = bar_count * (bar_w + gap) - gap;
     int start_x = (DISPLAY_WIDTH - total_w) / 2;
-    int max_h = 55;
-    int base_y = 55;
+    int max_h = 40;
+    int base_y = 80;
 
     for (int i = 0; i < bar_count; i++) {
         float t = (float)(i + 1) / bar_count;
@@ -173,7 +169,7 @@ void ui_show_processing_screen(void)
 {
     epaper_clear();
     int tw = epaper_text_width("Thinking...", 16);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 12, "Thinking...", 16);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Thinking...", 16);
     draw_status_bar();
     epaper_partial_refresh();
 }
@@ -216,16 +212,6 @@ void ui_show_provisioning_screen(const char *ap_name, const char *url)
     epaper_full_refresh();
 }
 
-static void draw_car_icon(int x, int y)
-{
-    epaper_draw_rect(x + 4, y + 8, 28, 10, 1);
-    epaper_draw_rect(x + 10, y + 2, 16, 6, 1);
-    epaper_draw_rect(x + 12, y + 4, 5, 3, 0);
-    epaper_draw_rect(x + 19, y + 4, 5, 3, 0);
-    epaper_draw_rect(x + 6, y + 18, 5, 3, 1);
-    epaper_draw_rect(x + 25, y + 18, 5, 3, 1);
-}
-
 static void draw_charging_bolt(int x, int y)
 {
     epaper_draw_line(x + 4, y, x + 1, y + 10);
@@ -236,33 +222,23 @@ static void draw_charging_bolt(int x, int y)
     epaper_draw_line(x + 2, y + 10, x + 5, y);
 }
 
+static void draw_battery_icon_charging(int x, int y, int pct)
+{
+    draw_battery_icon(x, y, pct);
+    draw_charging_bolt(x + 6, y - 2);
+}
+
 void ui_show_docked_screen(void)
 {
     epaper_clear();
-    draw_charging_bolt(DISPLAY_WIDTH / 2 - 4, 40);
+    draw_battery_icon_charging(DISPLAY_WIDTH / 2 - 9, 40, battery);
     int tw = epaper_text_width("Sleep & Charge", 12);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 80, "Sleep & Charge", 12);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 70, "Sleep & Charge", 12);
     char pct[8];
     snprintf(pct, sizeof(pct), "%d%%", battery);
     int tw2 = epaper_text_width(pct, 16);
-    epaper_draw_text((DISPLAY_WIDTH - tw2) / 2, 100, pct, 16);
+    epaper_draw_text((DISPLAY_WIDTH - tw2) / 2, 88, pct, 16);
     epaper_full_refresh();
-}
-
-void ui_show_driving_screen(void)
-{
-    epaper_clear();
-    draw_car_icon(DISPLAY_WIDTH / 2 - 18, 16);
-    int tw = epaper_text_width("Driving Mode", 12);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 44, "Driving Mode", 12);
-    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=exit", 8);
-    draw_status_bar();
-    epaper_partial_refresh();
-}
-
-void ui_set_driving_mode(bool enabled)
-{
-    driving_mode = enabled;
 }
 
 static void draw_moon_icon(int x, int y)

@@ -393,3 +393,8 @@ void audio_pipeline_set_docked(bool docked)
     pipeline_docked = docked;
     ESP_LOGI(TAG, "Docked mode %s", docked ? "enabled" : "disabled");
 }
+
+bool audio_pipeline_is_docked(void)
+{
+    return pipeline_docked;
+}

@@ -18,6 +18,7 @@ static ws_message_callback_t message_cb = NULL;
 static char auth_token[128] = {0};
 
 static char discovered_url[256] = {0};
+static int reconnect_cooldown = 0;
 
 static esp_err_t discover_gateway(void)
 {
@@ -181,8 +182,19 @@ bool ws_client_is_connected(void)
 
 void ws_client_reconnect(void)
 {
-    if (client && !esp_websocket_client_is_connected(client)) {
-        ESP_LOGW(TAG, "WebSocket not connected, forcing reconnect");
-        esp_websocket_client_start(client);
+    if (!client) return;
+    if (esp_websocket_client_is_connected(client)) {
+        reconnect_cooldown = 0;
+        return;
     }
+
+    // Only attempt full restart every 6th call (~30s) to avoid reconnect storms
+    reconnect_cooldown++;
+    if (reconnect_cooldown < 6) return;
+    reconnect_cooldown = 0;
+
+    ESP_LOGW(TAG, "WebSocket disconnected, restarting client");
+    esp_websocket_client_stop(client);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_websocket_client_start(client);
 }

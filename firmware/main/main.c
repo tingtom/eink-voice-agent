@@ -62,7 +62,6 @@ typedef enum {
 static app_mode_t current_app_mode = APP_MODE_HOME;
 static sub_state_t current_sub = SUB_MENU;
 static int menu_selection = 0;
-static bool driving_mode = false;
 static bool was_charging = false;
 
 // View notes state
@@ -257,16 +256,9 @@ static void draw_note_detail(int idx)
 // Long press  = confirm (BOOT) or back/sleep (PWR)
 static void handle_longpress(button_id_t btn)
 {
-    if (driving_mode) {
-        ESP_LOGI(TAG, "Exiting driving mode");
-        driving_mode = false;
-        ui_set_driving_mode(false);
-        audio_pipeline_set_docked(power_is_charging());
-        if (current_sub == SUB_RECORDING) {
-            audio_pipeline_stop_recording();
-            audio_pipeline_stop_offline_recording();
-        }
-        finish_current_mode();
+    if (audio_pipeline_is_docked()) {
+        ESP_LOGI(TAG, "Exiting docked mode via button press");
+        audio_pipeline_set_docked(false);
         return_home();
         return;
     }
@@ -362,16 +354,10 @@ static void handle_longpress(button_id_t btn)
 
 static void handle_button(button_id_t btn)
 {
-    // If docked, any button wakes into driving mode
-    if (power_is_charging() && !driving_mode) {
-        ESP_LOGI(TAG, "Waking from docked, entering driving mode");
-        driving_mode = true;
-        ui_set_driving_mode(true);
+    if (audio_pipeline_is_docked()) {
+        ESP_LOGI(TAG, "Exiting docked mode via button press");
         audio_pipeline_set_docked(false);
-        current_app_mode = APP_MODE_VOICE_AGENT;
-        current_sub = SUB_RECORDING;
-        mode_voice_agent_start();
-        ui_show_driving_screen();
+        return_home();
         return;
     }
 
@@ -438,16 +424,8 @@ static void handle_button(button_id_t btn)
             }
             current_sub = SUB_PROCESSING;
         } else if (current_sub == SUB_RESPONSE) {
-            if (driving_mode) {
-                ESP_LOGI(TAG, "Driving mode loop: restarting voice agent");
-                audio_pipeline_stop_processing();
-                mode_voice_agent_start();
-                ui_show_driving_screen();
-                current_sub = SUB_RECORDING;
-            } else {
-                finish_current_mode();
-                return_home();
-            }
+            finish_current_mode();
+            return_home();
         } else if (current_sub == SUB_PROCESSING) {
             finish_current_mode();
             return_home();
@@ -668,17 +646,10 @@ void app_main(void)
         // ── Charging state transitions ──────────────────────
         bool now_charging = power_is_charging();
 
-        if (!now_charging && driving_mode) {
-            driving_mode = false;
-            ui_set_driving_mode(false);
-        }
-
         if (now_charging != was_charging) {
             if (now_charging) {
                 ESP_LOGI(TAG, "Charging detected");
                 if (current_app_mode == APP_MODE_HOME && current_sub == SUB_MENU) {
-                    driving_mode = false;
-                    ui_set_driving_mode(false);
                     audio_pipeline_set_docked(true);
                     ui_show_docked_screen();
                 }
@@ -733,7 +704,7 @@ void app_main(void)
         }
 
         // Skip sleep timer when docked (on USB power)
-        bool docked = now_charging && !driving_mode;
+        bool docked = now_charging;
         if (!docked && power_should_sleep()) {
             ESP_LOGI(TAG, "Entering deep sleep...");
             ui_show_sleep_screen();

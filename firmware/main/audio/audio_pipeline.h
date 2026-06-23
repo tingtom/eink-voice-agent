@@ -29,3 +29,4 @@ bool audio_pipeline_is_offline_recording(void);
 
 // Dock control — when docked, VAD and wake word are suppressed
 void audio_pipeline_set_docked(bool docked);
+bool audio_pipeline_is_docked(void);

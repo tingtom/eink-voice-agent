@@ -32,6 +32,11 @@ bool sdcard_mount(void)
 {
     if (sdcard_mounted) return true;
 
+    // Enable pull-up on CS pin for stability on shared SPI bus
+    gpio_set_pull_mode(PIN_CS, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(PIN_MOSI, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(PIN_CLK, GPIO_PULLUP_ONLY);
+
     // Try to initialize SPI bus. If e-paper already did this, it will
     // return ESP_ERR_INVALID_STATE — that's fine, bus is ready.
     spi_bus_config_t bus_cfg = {
@@ -49,13 +54,15 @@ bool sdcard_mount(void)
     }
     // ESP_ERR_INVALID_STATE means bus already active (e-paper inited it) — OK
 
+    // Lower clock speed for shared bus stability
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.slot = SPI_HOST;
+    host.max_freq_khz = 5000;
+
     // Configure SDSPI slot
     sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_cfg.gpio_cs = PIN_CS;
     slot_cfg.host_id = SPI_HOST;
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI_HOST;
 
     // Mount FAT filesystem
     esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
@@ -66,8 +73,13 @@ bool sdcard_mount(void)
 
     ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &sdcard_card);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SD card mount failed: %s", esp_err_to_name(ret));
-        return false;
+        ESP_LOGE(TAG, "SD card mount failed: %s (retrying once with delay)", esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &sdcard_card);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SD card mount still failed: %s", esp_err_to_name(ret));
+            return false;
+        }
     }
 
     sdcard_mounted = true;
