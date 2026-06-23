@@ -33,6 +33,7 @@
 #include "recordings.h"
 #include "sdcard.h"
 #include "mdns.h"
+#include "driver/spi_common.h"
 
 static const char *TAG = "MAIN";
 
@@ -567,6 +568,23 @@ void app_main(void)
 
     system_init();
     power_init();
+
+    // Pre-init shared SPI bus with full config (incl. MISO) before e-paper
+    // claims it. E-paper driver omits MISO (write-only), which breaks SD card.
+    {
+        spi_bus_config_t bus = {
+            .mosi_io_num = GPIO_NUM_5,
+            .miso_io_num = GPIO_NUM_4,
+            .sclk_io_num = GPIO_NUM_6,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+        };
+        esp_err_t err = spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
+        }
+    }
+
     epaper_init();
     ui_init();
     recordings_init();
