@@ -556,6 +556,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     system_init();
+    power_init();
     epaper_init();
     ui_init();
     recordings_init();
