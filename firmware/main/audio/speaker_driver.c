@@ -16,7 +16,7 @@ static uint8_t volume = 80;
 void speaker_init(void)
 {
     i2s_chan_config_t chan_cfg = {
-        .id = SPK_I2S_PORT,
+        .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
         .dma_desc_num = 8,
         .dma_frame_num = 1024,
@@ -38,10 +38,10 @@ void speaker_init(void)
             .bit_shift = true,
         },
         .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = SPK_I2S_BCLK_GPIO,
-            .ws = SPK_I2S_LRCK_GPIO,
-            .dout = SPK_I2S_DATA_GPIO,
+            .mclk = I2S_MCLK_GPIO,
+            .bclk = I2S_BCLK_GPIO,
+            .ws = I2S_WS_GPIO,
+            .dout = I2S_DOUT_GPIO,
             .din = I2S_GPIO_UNUSED,
             .invert_flags = {
                 .mclk_inv = false,

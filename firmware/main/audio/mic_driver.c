@@ -13,7 +13,7 @@ static bool is_running = false;
 void mic_init(void)
 {
     i2s_chan_config_t chan_cfg = {
-        .id = MIC_I2S_PORT,
+        .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
         .dma_desc_num = 8,
         .dma_frame_num = AUDIO_BUFFER_SIZE,
@@ -35,11 +35,11 @@ void mic_init(void)
             .bit_shift = true,
         },
         .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = MIC_I2S_BCLK_GPIO,
-            .ws = MIC_I2S_LRCK_GPIO,
+            .mclk = I2S_MCLK_GPIO,
+            .bclk = I2S_BCLK_GPIO,
+            .ws = I2S_WS_GPIO,
             .dout = I2S_GPIO_UNUSED,
-            .din = MIC_I2S_DATA_GPIO,
+            .din = I2S_DIN_GPIO,
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,

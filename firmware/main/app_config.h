@@ -1,10 +1,3 @@
-/**
- * Application Configuration
- *
- * Pin definitions, WiFi credentials, API endpoints, and tuning parameters.
- * Copy this to app_config_local.h and fill in your values.
- */
-
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
@@ -22,42 +15,47 @@
 #define HERMES_HTTP_URL     "http://192.168.1.10:8123"
 #define HERMES_WS_URL       "ws://192.168.1.10:8123/api/device/ws"
 
-// ── Pin Definitions (ESP32-C6) ──────────────────────────────
-// I2S Microphone (INMP441)
-#define MIC_I2S_BCLK_GPIO   4
-#define MIC_I2S_LRCK_GPIO   5
-#define MIC_I2S_DATA_GPIO   6
-#define MIC_I2S_PORT        I2S_NUM_0
+// ── Pin Definitions (Waveshare ESP32-C6-ePaper-1.54) ────────
+// I2C Bus (shared by TCA9554, PCF85063 RTC, SHTC3 sensor)
+#define I2C_SDA_GPIO        18
+#define I2C_SCL_GPIO        8
+#define I2C_PORT            I2C_NUM_0
 
-// I2S Speaker (MAX98357A)
-#define SPK_I2S_BCLK_GPIO   18
-#define SPK_I2S_LRCK_GPIO   19
-#define SPK_I2S_DATA_GPIO   20
-#define SPK_I2S_PORT        I2S_NUM_0
-#define SPK_ENABLE_GPIO     21
+// TCA9554 I/O Expander (I2C addr 0x38) - virtual GPIOs
+#define EXIO_EPD_PWR        0
+#define EXIO_AUDIO_PWR      1
+#define EXIO_AMP_ENABLE     3
+#define EXIO_LED            4
+#define EXIO_VBAT_PWR       5
 
-// e-Paper Display (SPI)
-#define EPAPER_MOSI_GPIO    7
-#define EPAPER_CLK_GPIO     8
-#define EPAPER_CS_GPIO      9
-#define EPAPER_DC_GPIO      10
+// e-Paper Display (SPI, SPI2_HOST)
+#define EPAPER_MOSI_GPIO    5
+#define EPAPER_MISO_GPIO    4
+#define EPAPER_CLK_GPIO     6
+#define EPAPER_CS_GPIO      7
+#define EPAPER_DC_GPIO      15
 #define EPAPER_RST_GPIO     11
-#define EPAPER_BUSY_GPIO    12
+#define EPAPER_BUSY_GPIO    10
 #define EPAPER_SPI_HOST     SPI2_HOST
 
-// Buttons
-#define BUTTON_UP_GPIO      13
-#define BUTTON_DOWN_GPIO    14
-#define BUTTON_SELECT_GPIO  15
-#define BUTTON_BACK_GPIO    16
+// I2S Audio (ES8311 codec)
+#define I2S_MCLK_GPIO       19
+#define I2S_BCLK_GPIO       21
+#define I2S_WS_GPIO         22
+#define I2S_DIN_GPIO        20
+#define I2S_DOUT_GPIO       23
+#define I2S_PORT            I2S_NUM_0
 
-// Battery
-#define BATTERY_ADC_GPIO    0  // ADC channel for battery voltage
-#define BATTERY_MIN_MV      3300
-#define BATTERY_MAX_MV      4200
+// Buttons (only 2 physical buttons on this board)
+#define BUTTON_BOOT_GPIO    9
+#define BUTTON_PWR_GPIO     2
 
-// Charging (TP4056)
-#define CHARGE_STATUS_GPIO  1
+// SD Card (shared SPI bus with e-paper)
+#define SD_CS_GPIO          3
+#define SD_MOSI_GPIO        5
+#define SD_MISO_GPIO        4
+#define SD_CLK_GPIO         6
+#define SD_SPI_HOST         SPI2_HOST
 
 // ── Audio ────────────────────────────────────────────────────
 #define AUDIO_SAMPLE_RATE   16000
@@ -74,9 +72,13 @@
 #define WAKE_WORD_SENSITIVITY  0.7f
 #define WAKE_WORD_MODEL_PATH   "/models/wake_word_model.h"
 
+// ── Battery ──────────────────────────────────────────────────
+#define BATTERY_MIN_MV      3300
+#define BATTERY_MAX_MV      4200
+
 // ── Power Management ─────────────────────────────────────────
-#define SLEEP_TIMEOUT_MS    300000  // 5 minutes idle before sleep
-#define BATTERY_CHECK_INTERVAL_MS 300000  // Check battery every 5 min
+#define SLEEP_TIMEOUT_MS    300000
+#define BATTERY_CHECK_INTERVAL_MS 300000
 
 // ── Display ──────────────────────────────────────────────────
 #define DISPLAY_WIDTH       200
@@ -89,4 +91,4 @@
 #define WS_PING_INTERVAL_SEC    30
 #define WS_TIMEOUT_MS           10000
 
-#endif // APP_CONFIG_H
+#endif

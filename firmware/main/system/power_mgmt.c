@@ -66,7 +66,7 @@ uint8_t power_get_battery_pct(void)
 
 bool power_is_charging(void)
 {
-    return gpio_get_level(CHARGE_STATUS_GPIO) == 0;
+    return false;
 }
 
 int32_t power_get_wake_count(void)
@@ -101,7 +101,7 @@ void power_enter_deep_sleep(uint64_t wake_time_us)
     if (wake_time_us > 0) {
         esp_sleep_enable_timer_wakeup(wake_time_us);
     }
-    gpio_wakeup_enable(BUTTON_SELECT_GPIO, GPIO_INTR_LOW_LEVEL);
+    gpio_wakeup_enable(BUTTON_BOOT_GPIO, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
 
     esp_deep_sleep_start();

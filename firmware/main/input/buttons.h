@@ -1,12 +1,11 @@
-// Button input
 #pragma once
 #include <stdint.h>
 
 typedef enum {
-    BUTTON_UP,
-    BUTTON_DOWN,
     BUTTON_SELECT,
     BUTTON_BACK,
+    BUTTON_UP,
+    BUTTON_DOWN,
     BUTTON_COUNT
 } button_id_t;
 

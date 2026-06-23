@@ -10,11 +10,14 @@
 
 static const char *TAG = "BUTTONS";
 
+// Map physical buttons to logical IDs:
+//   BOOT button (GPIO9) -> BUTTON_SELECT (main action)
+//   PWR  button (GPIO2) -> BUTTON_BACK    (secondary action)
 static const int button_gpios[BUTTON_COUNT] = {
-    BUTTON_UP_GPIO,
-    BUTTON_DOWN_GPIO,
-    BUTTON_SELECT_GPIO,
-    BUTTON_BACK_GPIO,
+    BUTTON_BOOT_GPIO,  // BUTTON_SELECT
+    BUTTON_PWR_GPIO,   // BUTTON_BACK
+    -1,                // BUTTON_UP (unused)
+    -1,                // BUTTON_DOWN (unused)
 };
 
 static button_callback_t user_callback = NULL;
@@ -32,11 +35,12 @@ static void buttons_scan_task(void *arg)
 
     while (1) {
         for (int i = 0; i < BUTTON_COUNT; i++) {
+            if (button_gpios[i] < 0) continue;
+
             bool pressed = gpio_get_level(button_gpios[i]) == 0;
 
             if (pressed) {
                 if (!last_state[i]) {
-                    // New press — debounce then fire
                     vTaskDelay(pdMS_TO_TICKS(20));
                     if (gpio_get_level(button_gpios[i]) == 0) {
                         ESP_LOGI(TAG, "Button %d pressed", i);
@@ -47,7 +51,6 @@ static void buttons_scan_task(void *arg)
                         }
                     }
                 } else if (longpress_callback && !longpress_fired[i]) {
-                    // Check if held past threshold
                     if (esp_timer_get_time() - press_start_us[i] >=
                         (int64_t)longpress_threshold_ms * 1000LL) {
                         longpress_fired[i] = true;
@@ -67,6 +70,12 @@ static void buttons_scan_task(void *arg)
 
 void buttons_init(void)
 {
+    for (int i = 0; i < BUTTON_COUNT; i++) {
+        if (button_gpios[i] < 0) continue;
+        gpio_reset_pin(button_gpios[i]);
+        gpio_set_direction(button_gpios[i], GPIO_MODE_INPUT);
+        gpio_set_pull_mode(button_gpios[i], GPIO_PULLUP_ONLY);
+    }
     xTaskCreate(buttons_scan_task, "buttons", 2048, NULL, 10, NULL);
     ESP_LOGI(TAG, "Buttons initialized");
 }

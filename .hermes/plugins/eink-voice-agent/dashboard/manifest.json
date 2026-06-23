@@ -1,0 +1,14 @@
+{
+  "name": "eink-voice-agent",
+  "label": "E-Ink Agent",
+  "description": "E-Ink Voice Agent data — device status, todos, notes, and activity log.",
+  "icon": "TabletSmartphone",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/eink-voice-agent",
+    "position": "after:overview"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
