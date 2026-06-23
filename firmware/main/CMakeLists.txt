@@ -9,6 +9,7 @@ idf_component_register(
         "audio/audio_pipeline.c"
         "audio/wake_word.c"
         "audio/speaker_driver.c"
+        "audio/es8311.c"
         "audio/vad.c"
         "display/epaper_driver.c"
         "display/ui_manager.c"

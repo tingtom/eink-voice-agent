@@ -289,12 +289,12 @@ static void draw_action_bar(void)
             epaper_draw_text(8, 140, result_buf, 12);
         } else {
             show_result = false;
-            epaper_draw_text(8, 140, "UP/DOWN=nav SELECT=act", 8);
+            epaper_draw_text(8, 140, "PWR=down BOOT=up", 8);
         }
     } else {
-        epaper_draw_text(8, 140, "UP/DOWN=nav SELECT=act", 8);
+        epaper_draw_text(8, 140, "PWR=down BOOT=up", 8);
     }
-    epaper_draw_text(8, 160, "long SELECT=exit", 8);
+    epaper_draw_text(8, 160, "BOOTlong=act PWRlong=exit", 8);
 }
 
 static void draw_game_screen(void)
@@ -364,22 +364,26 @@ void mode_games_handle_button(int btn)
     eye_frame++;
 
     switch (btn) {
-    case 0: // BUTTON_UP
+    case 0: // BUTTON_SELECT (short press = UP)
         sel = (sel > 0) ? sel - 1 : ACTION_COUNT - 1;
         draw_game_screen();
         break;
 
-    case 1: // BUTTON_DOWN
+    case 1: // BUTTON_BACK (short press = DOWN)
         sel = (sel < ACTION_COUNT - 1) ? sel + 1 : 0;
         draw_game_screen();
         break;
-
-    case 2: // BUTTON_SELECT
-        do_action(sel);
-        if (active) draw_game_screen();
-        // If action was EXIT, active is now false; caller checks this
-        break;
     }
+}
+
+void mode_games_do_action(void)
+{
+    if (!active || pet.health == 0) return;
+    decay_stats();
+    pet.age_sec = (uint32_t)((esp_timer_get_time() - game_start_us) / 1000000);
+    eye_frame++;
+    do_action(sel);
+    if (active) draw_game_screen();
 }
 
 void mode_games_finish(void)

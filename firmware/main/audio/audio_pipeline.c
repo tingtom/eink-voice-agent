@@ -16,6 +16,7 @@
 #include "audio_pipeline.h"
 #include "recordings.h"
 #include "ui_manager.h"
+#include "es8311.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 
@@ -187,6 +188,7 @@ void audio_pipeline_init(void)
     ringbuffer_init(&audio_rb, AUDIO_BUFFER_SIZE * 4);
     mic_init();
     speaker_init();
+    ESP_ERROR_CHECK(es8311_init());
     wake_word_init();
     vad_init();
 

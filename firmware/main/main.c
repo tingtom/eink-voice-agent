@@ -247,16 +247,16 @@ static void draw_note_detail(int idx)
     snprintf(dur, sizeof(dur), "%lums", (unsigned long)info.duration_ms);
     epaper_draw_text(4, DISPLAY_HEIGHT - 14, dur, 8);
 
-    epaper_draw_text(100, DISPLAY_HEIGHT - 14, "SEL=play long=del", 8);
+    epaper_draw_text(100, DISPLAY_HEIGHT - 14, "BOOTlong=play BACK=back", 8);
     epaper_partial_refresh();
 }
 
-// ── Button handler ─────────────────────────────────────────
+// ── Button handlers ────────────────────────────────────────
 
+// Short press = navigation (UP/DOWN)
+// Long press  = confirm (BOOT) or back/sleep (PWR)
 static void handle_longpress(button_id_t btn)
 {
-    (void)btn;
-
     if (driving_mode) {
         ESP_LOGI(TAG, "Exiting driving mode");
         driving_mode = false;
@@ -272,51 +272,91 @@ static void handle_longpress(button_id_t btn)
     }
 
     if (current_app_mode == APP_MODE_HOME) {
-        ESP_LOGI(TAG, "Going to sleep from menu");
-        ui_show_sleep_screen();
-        vTaskDelay(pdMS_TO_TICKS(100));
-        power_enter_deep_sleep(0);
-        return;
-    }
-
-    if (current_app_mode == APP_MODE_GAMES) {
-        mode_games_finish();
-        return_home();
-        return;
-    }
-
-    if (current_app_mode == APP_MODE_VIEW_NOTES) {
-        if (current_sub == SUB_NOTE_DETAIL) {
-            // Long-press in detail = delete
-            recording_delete(notes_sel);
-            current_sub = SUB_NOTE_LIST;
-            draw_note_list();
-        } else {
-            return_home();
+        if (btn == BUTTON_BACK) {
+            // PWR long = sleep
+            ESP_LOGI(TAG, "Going to sleep from menu");
+            ui_show_sleep_screen();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            power_enter_deep_sleep(0);
+        } else if (btn == BUTTON_SELECT) {
+            // BOOT long = enter mode
+            enter_mode(menu_mode_map[menu_selection]);
         }
         return;
     }
-    if (current_app_mode == APP_MODE_SYNC) {
-        return_home();
+
+    // Long press BOOT = CONFIRM / STOP
+    if (btn == BUTTON_SELECT) {
+        switch (current_app_mode) {
+        case APP_MODE_GAMES:
+            mode_games_do_action();
+            if (!mode_games_is_active()) return_home();
+            return;
+        case APP_MODE_VIEW_NOTES:
+            if (current_sub == SUB_NOTE_LIST) {
+                current_sub = SUB_NOTE_DETAIL;
+                draw_note_detail(notes_sel);
+            } else {
+                recording_play(notes_sel);
+                draw_note_detail(notes_sel);
+            }
+            return;
+        case APP_MODE_SYNC:
+            return_home();
+            return;
+        default:
+            break;
+        }
+
+        switch (current_sub) {
+        case SUB_RECORDING:
+            audio_pipeline_stop_offline_recording();
+            audio_pipeline_stop_recording();
+            return_home();
+            break;
+        case SUB_PROCESSING:
+            finish_current_mode();
+            return_home();
+            break;
+        case SUB_RESPONSE:
+            finish_current_mode();
+            return_home();
+            break;
+        default:
+            break;
+        }
         return;
     }
 
-    switch (current_sub) {
-    case SUB_RECORDING:
-        audio_pipeline_stop_offline_recording();
-        audio_pipeline_stop_recording();
-        return_home();
-        break;
-    case SUB_PROCESSING:
-        finish_current_mode();
-        return_home();
-        break;
-    case SUB_RESPONSE:
-        finish_current_mode();
-        return_home();
-        break;
-    default:
-        break;
+    // Long press PWR = BACK / SLEEP
+    if (btn == BUTTON_BACK) {
+        switch (current_app_mode) {
+        case APP_MODE_GAMES:
+            mode_games_finish();
+            return_home();
+            return;
+        case APP_MODE_VIEW_NOTES:
+        case APP_MODE_SYNC:
+            return_home();
+            return;
+        default:
+            break;
+        }
+
+        switch (current_sub) {
+        case SUB_RECORDING:
+            audio_pipeline_stop_offline_recording();
+            audio_pipeline_stop_recording();
+            return_home();
+            break;
+        case SUB_PROCESSING:
+        case SUB_RESPONSE:
+            finish_current_mode();
+            return_home();
+            break;
+        default:
+            break;
+        }
     }
 }
 
@@ -335,95 +375,50 @@ static void handle_button(button_id_t btn)
         return;
     }
 
-    if (current_app_mode == APP_MODE_HOME) {
-        if (btn == BUTTON_UP && menu_selection > 0) {
+    switch (current_app_mode) {
+    case APP_MODE_HOME: {
+        // BOOT short = UP, PWR short = DOWN
+        if (btn == BUTTON_SELECT && menu_selection > 0) {
             menu_selection--;
             ui_show_menu(menu_items, menu_count, menu_selection);
-        } else if (btn == BUTTON_DOWN && menu_selection < menu_count - 1) {
+        } else if (btn == BUTTON_BACK && menu_selection < menu_count - 1) {
             menu_selection++;
             ui_show_menu(menu_items, menu_count, menu_selection);
-        } else if (btn == BUTTON_SELECT) {
-            enter_mode(menu_mode_map[menu_selection]);
         }
-        return;
+        break;
     }
-
-    if (current_app_mode == APP_MODE_GAMES) {
+    case APP_MODE_GAMES:
         mode_games_handle_button(btn);
-        if (!mode_games_is_active()) {
-            return_home();
-        }
-        return;
-    }
+        if (!mode_games_is_active()) return_home();
+        break;
 
-    if (current_app_mode == APP_MODE_VIEW_NOTES) {
+    case APP_MODE_VIEW_NOTES: {
         int count = recording_count();
-        if (count == 0) { return_home(); return; }
-
+        if (count == 0) { return_home(); break; }
         if (current_sub == SUB_NOTE_LIST) {
-            if (btn == BUTTON_UP) { notes_sel--; draw_note_list(); }
-            else if (btn == BUTTON_DOWN) { notes_sel++; draw_note_list(); }
-            else if (btn == BUTTON_SELECT) {
-                current_sub = SUB_NOTE_DETAIL;
-                draw_note_detail(notes_sel);
-            }
-        } else if (current_sub == SUB_NOTE_DETAIL) {
-            if (btn == BUTTON_SELECT) {
-                recording_play(notes_sel);
-                draw_note_detail(notes_sel);
-            } else if (btn == BUTTON_UP || btn == BUTTON_DOWN) {
-                current_sub = SUB_NOTE_LIST;
+            // BOOT short = UP, PWR short = DOWN
+            if (btn == BUTTON_SELECT && notes_sel > 0) {
+                notes_sel--;
+                draw_note_list();
+            } else if (btn == BUTTON_BACK && notes_sel < count - 1) {
+                notes_sel++;
                 draw_note_list();
             }
+        } else if (current_sub == SUB_NOTE_DETAIL) {
+            // Any short press in detail goes back to list
+            current_sub = SUB_NOTE_LIST;
+            draw_note_list();
         }
-        return;
+        break;
     }
 
-    if (current_app_mode == APP_MODE_SYNC) {
-        if (btn == BUTTON_SELECT) {
-            return_home();
-        }
-        return;
-    }
+    case APP_MODE_SYNC:
+        return_home();
+        break;
 
-    if (current_sub == SUB_RECORDING) {
-        if (btn == BUTTON_SELECT) {
-            switch (current_app_mode) {
-                case APP_MODE_VOICE_AGENT:
-                    mode_voice_agent_stop();
-                    break;
-                case APP_MODE_TRANSCRIBE:
-                    mode_transcribe_stop();
-                    break;
-                case APP_MODE_NOTE:
-                    mode_note_stop();
-                    break;
-                case APP_MODE_TODO:
-                    mode_todo_stop();
-                    break;
-                default:
-                    break;
-            }
-            current_sub = SUB_PROCESSING;
-        }
-        return;
-    }
-
-    if (current_sub == SUB_RESPONSE) {
-        if (btn == BUTTON_SELECT) {
-            if (driving_mode) {
-                // Loop back to listening
-                ESP_LOGI(TAG, "Driving mode loop: restarting voice agent");
-                audio_pipeline_stop_processing();
-                mode_voice_agent_start();
-                ui_show_driving_screen();
-                current_sub = SUB_RECORDING;
-            } else {
-                finish_current_mode();
-                return_home();
-            }
-        }
-        return;
+    default:
+        // Ignore short presses in recording/processing/response
+        break;
     }
 }
 
@@ -556,6 +551,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     system_init();
+    power_init();
     epaper_init();
     ui_init();
     recordings_init();
@@ -566,7 +562,7 @@ void app_main(void)
         wifi_init();
         provisioning_start_ap();
         provisioning_start_server();
-        ui_show_error("Connect to:\nEInk-Voice-\nConfig\n192.168.4.1");
+        ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(60000));
         }
@@ -602,7 +598,7 @@ void app_main(void)
         ESP_LOGW(TAG, "WiFi connection failed, starting provisioning");
         provisioning_start_ap();
         provisioning_start_server();
-        ui_show_error("WiFi failed\nConnect to:\nEInk-Voice-\nConfig\n192.168.4.1");
+        ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(60000));
         }

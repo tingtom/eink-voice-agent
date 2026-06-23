@@ -10,9 +10,9 @@
 
 static const char *TAG = "BUTTONS";
 
-// Map physical buttons to logical IDs:
-//   BOOT button (GPIO9) -> BUTTON_SELECT (main action)
-//   PWR  button (GPIO2) -> BUTTON_BACK    (secondary action)
+// Map physical buttons to logical IDs with press-type semantics:
+//   Short press (on release): BOOT->SELECT(UP), PWR->BACK(DOWN)
+//   Long press  (on hold):    BOOT->SELECT(CONFIRM), PWR->BACK(SLEEP)
 static const int button_gpios[BUTTON_COUNT] = {
     BUTTON_BOOT_GPIO,  // BUTTON_SELECT
     BUTTON_PWR_GPIO,   // BUTTON_BACK
@@ -46,9 +46,6 @@ static void buttons_scan_task(void *arg)
                         ESP_LOGI(TAG, "Button %d pressed", i);
                         press_start_us[i] = esp_timer_get_time();
                         longpress_fired[i] = false;
-                        if (user_callback) {
-                            user_callback((button_id_t)i);
-                        }
                     }
                 } else if (longpress_callback && !longpress_fired[i]) {
                     if (esp_timer_get_time() - press_start_us[i] >=
@@ -59,6 +56,9 @@ static void buttons_scan_task(void *arg)
                     }
                 }
             } else {
+                if (last_state[i] && !longpress_fired[i] && user_callback) {
+                    user_callback((button_id_t)i);
+                }
                 longpress_fired[i] = false;
             }
 

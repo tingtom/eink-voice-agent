@@ -153,6 +153,17 @@ void ui_show_error(const char *message)
     epaper_full_refresh();
 }
 
+void ui_show_provisioning_screen(const char *ap_name, const char *url)
+{
+    epaper_clear();
+    epaper_draw_text(DISPLAY_WIDTH / 2 - 40, 12, "Setup Mode", 16);
+    epaper_draw_text(10, 55, "Connect to WiFi:", 12);
+    epaper_draw_text(10, 73, ap_name, 8);
+    epaper_draw_text(10, 90, "Then open:", 12);
+    epaper_draw_text(10, 108, url, 12);
+    epaper_full_refresh();
+}
+
 static void draw_car_icon(int x, int y)
 {
     // Body
