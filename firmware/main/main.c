@@ -377,12 +377,12 @@ static void handle_button(button_id_t btn)
 
     switch (current_app_mode) {
     case APP_MODE_HOME: {
-        // BOOT short = UP, PWR short = DOWN
-        if (btn == BUTTON_SELECT && menu_selection > 0) {
-            menu_selection--;
+        // BOOT short = UP (wrap), PWR short = DOWN (wrap)
+        if (btn == BUTTON_SELECT) {
+            menu_selection = (menu_selection > 0) ? menu_selection - 1 : menu_count - 1;
             ui_show_menu(menu_items, menu_count, menu_selection);
-        } else if (btn == BUTTON_BACK && menu_selection < menu_count - 1) {
-            menu_selection++;
+        } else if (btn == BUTTON_BACK) {
+            menu_selection = (menu_selection + 1) % menu_count;
             ui_show_menu(menu_items, menu_count, menu_selection);
         }
         break;
@@ -396,16 +396,15 @@ static void handle_button(button_id_t btn)
         int count = recording_count();
         if (count == 0) { return_home(); break; }
         if (current_sub == SUB_NOTE_LIST) {
-            // BOOT short = UP, PWR short = DOWN
-            if (btn == BUTTON_SELECT && notes_sel > 0) {
-                notes_sel--;
+            // BOOT short = UP (wrap), PWR short = DOWN (wrap)
+            if (btn == BUTTON_SELECT) {
+                notes_sel = (notes_sel > 0) ? notes_sel - 1 : count - 1;
                 draw_note_list();
-            } else if (btn == BUTTON_BACK && notes_sel < count - 1) {
-                notes_sel++;
+            } else if (btn == BUTTON_BACK) {
+                notes_sel = (notes_sel + 1) % count;
                 draw_note_list();
             }
         } else if (current_sub == SUB_NOTE_DETAIL) {
-            // Any short press in detail goes back to list
             current_sub = SUB_NOTE_LIST;
             draw_note_list();
         }
@@ -417,7 +416,42 @@ static void handle_button(button_id_t btn)
         break;
 
     default:
-        // Ignore short presses in recording/processing/response
+        // In recording/processing/response, any short press exits
+        if (current_sub == SUB_RECORDING) {
+            audio_pipeline_stop_offline_recording();
+            audio_pipeline_stop_recording();
+            switch (current_app_mode) {
+                case APP_MODE_VOICE_AGENT:
+                    mode_voice_agent_stop();
+                    break;
+                case APP_MODE_TRANSCRIBE:
+                    mode_transcribe_stop();
+                    break;
+                case APP_MODE_NOTE:
+                    mode_note_stop();
+                    break;
+                case APP_MODE_TODO:
+                    mode_todo_stop();
+                    break;
+                default:
+                    break;
+            }
+            current_sub = SUB_PROCESSING;
+        } else if (current_sub == SUB_RESPONSE) {
+            if (driving_mode) {
+                ESP_LOGI(TAG, "Driving mode loop: restarting voice agent");
+                audio_pipeline_stop_processing();
+                mode_voice_agent_start();
+                ui_show_driving_screen();
+                current_sub = SUB_RECORDING;
+            } else {
+                finish_current_mode();
+                return_home();
+            }
+        } else if (current_sub == SUB_PROCESSING) {
+            finish_current_mode();
+            return_home();
+        }
         break;
     }
 }

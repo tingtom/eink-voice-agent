@@ -50,9 +50,17 @@ void power_init(void)
 
 static int read_battery_mv(void)
 {
+    if (!adc_handle) {
+        ESP_LOGW(TAG, "ADC handle NULL, reinitializing");
+        power_init();
+        if (!adc_handle) return BATTERY_MIN_MV;
+    }
     int raw = 0;
     esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL_0, &raw);
-    if (ret != ESP_OK) return BATTERY_MIN_MV;
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "ADC read failed: %s", esp_err_to_name(ret));
+        return BATTERY_MIN_MV;
+    }
     return (raw * BATTERY_MAX_MV) / 4095;
 }
 

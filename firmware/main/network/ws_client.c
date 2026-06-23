@@ -15,7 +15,6 @@ static const char *TAG = "WS";
 
 static esp_websocket_client_handle_t client = NULL;
 static ws_message_callback_t message_cb = NULL;
-static bool connected = false;
 static char auth_token[128] = {0};
 
 static char discovered_url[256] = {0};
@@ -59,7 +58,6 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
-            connected = true;
             ESP_LOGI(TAG, "WebSocket connected");
             {
                 char auth[256];
@@ -71,7 +69,6 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
             break;
 
         case WEBSOCKET_EVENT_DISCONNECTED:
-            connected = false;
             ESP_LOGW(TAG, "WebSocket disconnected");
             break;
 
@@ -134,13 +131,13 @@ esp_err_t ws_client_send_audio(const uint8_t *data, size_t len)
 
 esp_err_t ws_client_send_json(const char *json_str)
 {
-    if (!connected) return ESP_FAIL;
+    if (!client || !esp_websocket_client_is_connected(client)) return ESP_FAIL;
     return esp_websocket_client_send_text(client, json_str, strlen(json_str), portMAX_DELAY);
 }
 
 esp_err_t ws_client_send_audio_mode(const uint8_t *data, size_t len, const char *mode)
 {
-    if (!connected) return ESP_FAIL;
+    if (!client || !esp_websocket_client_is_connected(client)) return ESP_FAIL;
 
     size_t b64_len = ((len + 2) / 3) * 4 + 256;
     char *payload = malloc(b64_len);
@@ -162,7 +159,7 @@ esp_err_t ws_client_send_audio_mode(const uint8_t *data, size_t len, const char 
 
 esp_err_t ws_client_send_text(const char *text)
 {
-    if (!connected) return ESP_FAIL;
+    if (!client || !esp_websocket_client_is_connected(client)) return ESP_FAIL;
     return esp_websocket_client_send_text(client, text, strlen(text), portMAX_DELAY);
 }
 
@@ -173,5 +170,5 @@ void ws_client_set_callback(ws_message_callback_t cb)
 
 bool ws_client_is_connected(void)
 {
-    return connected;
+    return client && esp_websocket_client_is_connected(client);
 }
