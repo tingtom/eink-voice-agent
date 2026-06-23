@@ -163,27 +163,42 @@ static bool setup_tflite(void)
     return true;
 }
 
-extern "C" void wake_word_init(void)
+extern "C" void wake_word_prealloc(void)
 {
-    ESP_LOGI(TAG, "Initializing wake word model: '%s' (sensitivity=%.1f)",
-             WAKE_WORD, sensitivity);
+    if (audio_buf && tflite_arena) return;
+
+    ESP_LOGI(TAG, "Pre-allocating buffers (audio=%d, arena=%d)",
+             MFE_INPUT_SAMPLES * (int)sizeof(int16_t), TFLITE_MODEL_ARENA_SIZE);
 
     ESP_LOGI(TAG, "Free heap: %" PRIu32 ", largest block: %" PRIu32,
              (uint32_t)esp_get_free_heap_size(),
              (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
-    audio_buf = (int16_t *)malloc(MFE_INPUT_SAMPLES * sizeof(int16_t));
     if (!audio_buf) {
-        ESP_LOGE(TAG, "Failed to allocate audio buffer (%d bytes)",
-                 MFE_INPUT_SAMPLES * (int)sizeof(int16_t));
-        return;
+        audio_buf = (int16_t *)malloc(MFE_INPUT_SAMPLES * sizeof(int16_t));
+        if (!audio_buf) {
+            ESP_LOGE(TAG, "Failed to allocate audio buffer (%d bytes)",
+                     MFE_INPUT_SAMPLES * (int)sizeof(int16_t));
+        }
     }
 
-    tflite_arena = (uint8_t *)malloc(TFLITE_MODEL_ARENA_SIZE);
     if (!tflite_arena) {
-        ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)", TFLITE_MODEL_ARENA_SIZE);
-        free(audio_buf);
-        audio_buf = NULL;
+        tflite_arena = (uint8_t *)malloc(TFLITE_MODEL_ARENA_SIZE);
+        if (!tflite_arena) {
+            ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)", TFLITE_MODEL_ARENA_SIZE);
+            free(audio_buf);
+            audio_buf = NULL;
+        }
+    }
+}
+
+extern "C" void wake_word_init(void)
+{
+    ESP_LOGI(TAG, "Initializing wake word model: '%s' (sensitivity=%.1f)",
+             WAKE_WORD, sensitivity);
+
+    if (!audio_buf || !tflite_arena) {
+        ESP_LOGE(TAG, "Buffers not allocated — wake word disabled");
         return;
     }
 
