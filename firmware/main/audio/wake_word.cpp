@@ -9,7 +9,7 @@
 #include "wake_word.h"
 #include "tflite_learn_1037720_5.h"
 #undef TFLITE_MODEL_ARENA_SIZE
-#define TFLITE_MODEL_ARENA_SIZE 61440  // 60KB — reduced from 162284
+#define TFLITE_MODEL_ARENA_SIZE 65536  // 64KB — reduced from 162284
 #include "model_ops.h"
 #include "model_metadata.h"
 #include "model_mfe.h"

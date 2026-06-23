@@ -575,7 +575,7 @@ void app_main(void)
             .sclk_io_num = GPIO_NUM_6,
             .quadwp_io_num = -1,
             .quadhd_io_num = -1,
-            .max_transfer_sz = 4092,
+            .max_transfer_sz = 8192,
         };
         esp_err_t err = spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
