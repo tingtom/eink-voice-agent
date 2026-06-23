@@ -566,7 +566,7 @@ void app_main(void)
         wifi_init();
         provisioning_start_ap();
         provisioning_start_server();
-        ui_show_error("Connect to WiFi:\nEInk-Voice-Config\nhttp://192.168.4.1");
+        ui_show_error("Connect to:\nEInk-Voice-\nConfig\n192.168.4.1");
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(60000));
         }
@@ -602,7 +602,7 @@ void app_main(void)
         ESP_LOGW(TAG, "WiFi connection failed, starting provisioning");
         provisioning_start_ap();
         provisioning_start_server();
-        ui_show_error("WiFi failed\nConnect to:\nEInk-Voice-Config\nhttp://192.168.4.1");
+        ui_show_error("WiFi failed\nConnect to:\nEInk-Voice-\nConfig\n192.168.4.1");
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(60000));
         }
