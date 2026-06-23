@@ -29,7 +29,7 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 
 // Playback test buffer — accumulates audio during recording for speaker loopback
-#define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE * 3)
+#define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE / 2)  // 0.5s loopback buffer (32KB @16kHz)
 static int16_t *playback_buf = NULL;
 static size_t playback_len = 0;
 
