@@ -23,12 +23,15 @@ void speaker_init(void)
     ESP_LOGI(TAG, "Speaker ready (I2S, %d Hz)", AUDIO_SAMPLE_RATE);
 }
 
+esp_err_t speaker_enable(void)
+{
+    if (!spk_chan) return ESP_ERR_INVALID_STATE;
+    return i2s_channel_enable(spk_chan);
+}
+
 esp_err_t speaker_play(const int16_t *audio, size_t samples)
 {
     if (!spk_chan) return ESP_ERR_INVALID_STATE;
-
-    esp_err_t ret = i2s_channel_enable(spk_chan);
-    if (ret != ESP_OK) return ret;
 
     is_playing = true;
 
@@ -46,11 +49,10 @@ esp_err_t speaker_play(const int16_t *audio, size_t samples)
     }
 
     size_t bytes_written = 0;
-    ret = i2s_channel_write(spk_chan, src, samples * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+    esp_err_t ret = i2s_channel_write(spk_chan, src, samples * sizeof(int16_t), &bytes_written, portMAX_DELAY);
 
     free(scaled);
     is_playing = false;
-    i2s_channel_disable(spk_chan);
 
     return ret;
 }
@@ -64,9 +66,6 @@ void speaker_play_file(const char *pcm_path)
         ESP_LOGE(TAG, "Cannot open %s", pcm_path);
         return;
     }
-
-    esp_err_t ret = i2s_channel_enable(spk_chan);
-    if (ret != ESP_OK) { fclose(f); return; }
 
     is_playing = true;
     const size_t chunk = 512;
@@ -89,17 +88,13 @@ void speaker_play_file(const char *pcm_path)
 
     fclose(f);
     is_playing = false;
-    i2s_channel_disable(spk_chan);
 
     ESP_LOGI(TAG, "Playback finished: %s", pcm_path);
 }
 
 void speaker_stop(void)
 {
-    if (is_playing) {
-        i2s_channel_disable(spk_chan);
-        is_playing = false;
-    }
+    is_playing = false;
 }
 
 void speaker_set_volume(uint8_t vol)

@@ -262,6 +262,7 @@ void audio_pipeline_init(void)
     xTaskCreate(vad_task, "vad", 3072, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
 
+    ESP_ERROR_CHECK(speaker_enable());
     playback_buf = (int16_t *)calloc(PLAYBACK_BUF_MAX_SAMPLES, sizeof(int16_t));
     if (!playback_buf) {
         ESP_LOGE(TAG, "Failed to allocate playback buffer (%zu bytes)",
