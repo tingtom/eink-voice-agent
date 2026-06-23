@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 void ui_init(void);
 void ui_show_boot_screen(const char *device_name);
@@ -15,8 +16,9 @@ void ui_show_provisioning_screen(const char *ap_name, const char *url);
 void ui_show_sleep_screen(void);
 void ui_show_docked_screen(void);
 void ui_show_driving_screen(void);
-void ui_update_status_bar(bool wifi_connected, uint8_t battery_pct);
+void ui_update_status_bar(bool wifi_connected, bool hermes_connected, uint8_t battery_pct);
 void ui_update_battery(uint8_t pct);
 void ui_update_wifi_status(bool connected);
+void ui_update_hermes_status(bool connected);
 void ui_set_status_text(const char *text);
 void ui_set_driving_mode(bool enabled);

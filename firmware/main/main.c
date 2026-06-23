@@ -617,7 +617,7 @@ void app_main(void)
 
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "WiFi connected");
-        ui_update_status_bar(true, power_get_battery_pct());
+        ui_update_status_bar(true, ws_client_is_connected(), power_get_battery_pct());
 
         // mDNS advertisement
         ESP_ERROR_CHECK(mdns_init());
@@ -663,6 +663,7 @@ void app_main(void)
         uint8_t battery = power_get_battery_pct();
         ui_update_battery(battery);
         ui_update_wifi_status(wifi_is_connected());
+        ui_update_hermes_status(ws_client_is_connected());
 
         // ── Charging state transitions ──────────────────────
         bool now_charging = power_is_charging();

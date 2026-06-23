@@ -14,6 +14,7 @@
 #include "app_config.h"
 #include "epaper_driver.h"
 #include "mic_driver.h"
+#include "system_init.h"
 
 static const char *TAG = "POWER";
 
@@ -94,7 +95,20 @@ uint8_t power_get_battery_pct(void)
 
 bool power_is_charging(void)
 {
-    return false;
+    // TCA9554 pins configured as input (bits 1=INPUT in config register):
+    // P2 (bit 2), P6 (bit 6), P7 (bit 7) — any could be charger status
+    static const uint8_t INPUT_PINS = (1 << 2) | (1 << 6) | (1 << 7);
+    uint8_t inputs = tca9554_read_input();
+    // Active-low charge indicator: pin pulled low when charging
+    if ((~inputs) & INPUT_PINS) {
+        int mv = read_battery_mv();
+        if (mv > BATTERY_MIN_MV + 200) {
+            return true;
+        }
+    }
+    // Fallback: voltage near max suggests plugged in
+    int mv = read_battery_mv();
+    return mv >= (BATTERY_MAX_MV - 30);
 }
 
 int32_t power_get_wake_count(void)

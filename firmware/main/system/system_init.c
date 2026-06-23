@@ -26,6 +26,15 @@ static void tca9554_write_reg(uint8_t reg, uint8_t val)
     i2c_master_transmit(tca9554_dev, data, 2, 100);
 }
 
+uint8_t tca9554_read_input(void)
+{
+    uint8_t reg = TCA9554_INPUT;
+    uint8_t val;
+    i2c_master_transmit(tca9554_dev, &reg, 1, 100);
+    i2c_master_receive(tca9554_dev, &val, 1, 100);
+    return val;
+}
+
 static uint8_t tca9554_read_output(void)
 {
     uint8_t reg = TCA9554_OUTPUT;

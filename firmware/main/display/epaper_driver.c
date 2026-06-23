@@ -127,6 +127,15 @@ void epaper_draw_text(int x, int y, const char *text, int font_size)
     }
 }
 
+int epaper_text_width(const char *text, int font_size)
+{
+    int scale;
+    if (font_size <= 8) scale = 1;
+    else if (font_size <= 14) scale = 2;
+    else scale = 3;
+    return strlen(text) * char_width(scale);
+}
+
 void epaper_draw_line(int x1, int y1, int x2, int y2)
 {
     int dx = (x2 > x1) ? (x2 - x1) : (x1 - x2);
