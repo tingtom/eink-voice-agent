@@ -28,7 +28,7 @@ static tflite::MicroInterpreter *interpreter = NULL;
 static TfLiteTensor *input_tensor = NULL;
 static TfLiteTensor *output_tensor = NULL;
 
-static float sensitivity = 0.7f;
+static float sensitivity = WAKE_WORD_SENSITIVITY;
 static bool initialized = false;
 
 static void bit_reverse_256(float *re, float *im)
@@ -213,6 +213,7 @@ extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
     int8_t *input_data = input_tensor->data.int8;
     extract_mfe(audio_buf, input_data);
 
+    ESP_LOGI(TAG, "Running inference (%d samples accumulated)", MFE_INPUT_SAMPLES);
     if (interpreter->Invoke() != kTfLiteOk) {
         ESP_LOGE(TAG, "Inference failed");
         audio_count = 0;
@@ -231,7 +232,7 @@ extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
     audio_count = 0;
 
     for (int i = 0; i < WAKE_WORD_MODEL_OUTPUT_COUNT; i++) {
-        ESP_LOGD(TAG, "  %s: %.4f",
+        ESP_LOGI(TAG, "  %s: %.4f",
                  i == 0 ? "hi_jeff"
                         : (i == 1 ? "noise" : "unknown"),
                  (double)scores[i]);

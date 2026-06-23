@@ -40,7 +40,7 @@ static EventGroupHandle_t audio_events;
 
 #define VAD_BURST_MS        50
 #define VAD_BURST_SAMPLES   ((AUDIO_SAMPLE_RATE * VAD_BURST_MS) / 1000)
-#define VAD_CONFIRM_FRAMES  4
+#define VAD_CONFIRM_FRAMES  2
 
 #define UI_UPDATE_INTERVAL_US  (300 * 1000)
 
