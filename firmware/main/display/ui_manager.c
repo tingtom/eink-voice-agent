@@ -160,16 +160,11 @@ void ui_update_recording_viz(int32_t energy)
     epaper_partial_refresh();
 }
 
-static const int SPOKES[8][2] = {
-    {0, -28}, {20, -20}, {28, 0}, {20, 20},
-    {0, 28}, {-20, 20}, {-28, 0}, {-20, -20},
-};
-
 void ui_show_processing_screen(void)
 {
     epaper_clear();
     int tw = epaper_text_width("Thinking...", 16);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Thinking...", 16);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 25, "Thinking...", 16);
     draw_status_bar();
     epaper_partial_refresh();
 }
@@ -177,10 +172,12 @@ void ui_show_processing_screen(void)
 void ui_update_processing_anim(int frame)
 {
     int cx = DISPLAY_WIDTH / 2;
-    int cy = 80;
-    int n = frame % 8;
+    int cy = 85;
+    int sizes[] = {6, 10, 14, 18, 22, 18, 14, 10};
+    int s = sizes[frame % 8];
 
-    epaper_draw_line(cx, cy, cx + SPOKES[n][0], cy + SPOKES[n][1]);
+    epaper_draw_rect(cx - 24, cy - 24, 48, 48, 0);
+    epaper_draw_rect(cx - s, cy - s, s * 2, s * 2, 1);
     epaper_partial_refresh();
 }
 
