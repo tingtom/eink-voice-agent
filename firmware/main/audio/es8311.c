@@ -44,6 +44,10 @@ static const reg_cfg init_seq[] = {
     {0x00, 0x3F},
     {0x00, 0x00},
 
+    // GPIO I2C noise immunity (from Espressif driver)
+    {0x44, 0x08},
+    {0x44, 0x08},
+
     // Power up LDO + analog blocks
     {0x31, 0x08},   // LDO D2A enable
     {0x30, 0x00},   // LDO control
@@ -55,31 +59,53 @@ static const reg_cfg init_seq[] = {
     {0x2C, 0xFF},   // Additional power blocks
     {0x2D, 0x30},   // Bias current setup
 
-    // Clock for 16kHz I2S slave (MCLK/LRCK = 256)
-    {0x01, 0x00},   // MCLK_SRC=0 (use MCLK pin)
-    {0x02, 0x10},   // FS_SEL=001 (16kHz at MCLK/LRCK=256)
-    {0x03, 0x04},   // CKM auto clock detection
+    // Clock for 16kHz I2S slave (MCLK/LRCK = 256) — V2 registers
+    {0x01, 0x30},   // CLK_MANAGER_REG01: clk src + enable
+    {0x02, 0x00},   // CLK_MANAGER_REG02: dividers
+    {0x03, 0x10},   // CLK_MANAGER_REG03: ADC fs_mode + OSR
+    {0x04, 0x10},   // CLK_MANAGER_REG04: DAC OSR
+    {0x05, 0x00},   // CLK_MANAGER_REG05: ADC/DAC clock div
+    {0x06, 0x00},   // CLK_MANAGER_REG06: BCLK divider
 
-    // ADC input path — single-ended MIC1, Philips I2S 16-bit, +18dB PGA
+    // ADC input path — single-ended MIC1, +18dB PGA (V1 register)
     {0x04, 0x06},   // INPUT_SEL=00(MIC1), PGA_GAIN=11(+18dB)
-    {0x05, 0x00},   // ADC digital volume = 0dB
-    {0x06, 0x00},   // ADC format: Philips I2S, 16-bit (was 0x70 left-justified)
+
+    // I2S format — Philips (standard I2S), 16-bit (V2 registers)
+    {0x09, 0x0C},   // SDPIN_REG09: DAC format Philips 16-bit
+    {0x0A, 0x0C},   // SDPOUT_REG0A: ADC format Philips 16-bit
+
+    // System registers (V2)
+    {0x0B, 0x00},   // SYSTEM_REG0B
+    {0x0C, 0x00},   // SYSTEM_REG0C
+    {0x10, 0x1F},   // SYSTEM_REG10
+    {0x11, 0x7F},   // SYSTEM_REG11
+
+    // ADC power/enable (critical - from Espressif driver start())
+    {0x0E, 0x02},   // SYSTEM_REG0E: ADC power up
+    {0x12, 0x00},   // SYSTEM_REG12: DAC power
+    {0x14, 0x1A},   // SYSTEM_REG14: PGA gain + analog enable
+    {0x0D, 0x01},   // SYSTEM_REG0D: power control
+
+    // ADC/DAC config
+    {0x15, 0x40},   // ADC_REG15: ADC ramp rate
+    {0x16, 0x24},   // ADC_REG16: MIC gain (0dB + timer)
+    {0x17, 0xBF},   // ADC_REG17: ADC volume 0dB
+    {0x37, 0x08},   // DAC_REG37: DAC ramp rate
 
     // ALC off
-    {0x08, 0x00},
-    {0x09, 0x00},
-    {0x0A, 0x00},
-    {0x0B, 0x00},
+    {0x1A, 0x00},
+    {0x1B, 0x0A},   // ADC_REG1B: ALC/HPF
+    {0x1C, 0x6A},   // ADC_REG1C: EQ/HPF
 
     // DAC output path
     {0x14, 0x1A},   // DAC enable, de-emph off, soft-ramp off, unmute
-    {0x15, 0x00},   // DAC digital volume = 0dB
-    {0x16, 0x00},   // DAC format: Philips I2S, 16-bit (was 0x70 left-justified)
+    {0x15, 0x00},   // DAC digital volume = 0dB (note: overlaps ADC_REG15)
 
     // Misc
     {0x28, 0x00},   // Analog low power off
     {0x2E, 0x10},   // DAC tuning normal
     {0x21, 0xF0},   // GPIO all output
+    {0x45, 0x00},   // GP_REG45
 
     // Final volume reset
     {0x05, 0x00},   // ADC volume = 0dB
