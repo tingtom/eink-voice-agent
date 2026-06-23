@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_sleep.h"
+#include "esp_idf_version.h"
 #include "esp_timer.h"
 
 #include "app_config.h"
@@ -525,7 +526,11 @@ static bool handle_vad_burst(void)
 
 void app_main(void)
 {
+#if ESP_IDF_VERSION_MAJOR >= 6
+    esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_causes();
+#else
     esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
+#endif
 
     if (wake_cause == ESP_SLEEP_WAKEUP_TIMER) {
         if (handle_vad_burst()) {
