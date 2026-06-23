@@ -129,8 +129,8 @@ void power_enter_deep_sleep(uint64_t wake_time_us)
     if (wake_time_us > 0) {
         esp_sleep_enable_timer_wakeup(wake_time_us);
     }
-    gpio_wakeup_enable(BUTTON_BOOT_GPIO, GPIO_INTR_LOW_LEVEL);
-    esp_sleep_enable_gpio_wakeup();
+    uint64_t gpio_mask = (1ULL << BUTTON_BOOT_GPIO) | (1ULL << BUTTON_PWR_GPIO);
+    ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(gpio_mask, ESP_GPIO_WAKEUP_GPIO_LOW));
 
     esp_deep_sleep_start();
 }
