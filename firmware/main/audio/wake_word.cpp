@@ -72,11 +72,10 @@ static void fft_256(float *re, float *im)
 
 static int extract_mfe(const int16_t *samples, int8_t *features_out)
 {
-    float frame[MFE_FFT_SIZE];
-    float re[MFE_FFT_SIZE];
-    float im[MFE_FFT_SIZE];
-    float mel_energy[MFE_NUM_FILTERS];
-    float feat_buf[MFE_NUM_FRAMES * MFE_NUM_FILTERS];
+    static float re[MFE_FFT_SIZE];
+    static float im[MFE_FFT_SIZE];
+    static float mel_energy[MFE_NUM_FILTERS];
+    static float feat_buf[MFE_NUM_FRAMES * MFE_NUM_FILTERS];
 
     const float min_power = powf(10.0f, MFE_NOISE_FLOOR / 10.0f);
     const float inv_scale = 1.0f / INPUT_QUANT_SCALE;
@@ -86,10 +85,9 @@ static int extract_mfe(const int16_t *samples, int8_t *features_out)
         int start = f * MFE_FRAME_STRIDE;
         for (int i = 0; i < MFE_FFT_SIZE; i++) {
             float s = (float)samples[start + i] / 32768.0f;
-            frame[i] = s * mfe_hann_window[i];
+            re[i] = s * mfe_hann_window[i];
         }
         memset(im, 0, sizeof(im));
-        memcpy(re, frame, sizeof(frame));
         fft_256(re, im);
 
         for (int m = 0; m < MFE_NUM_FILTERS; m++) {
