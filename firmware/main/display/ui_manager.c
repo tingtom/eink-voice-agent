@@ -221,8 +221,16 @@ static void draw_charging_bolt(int x, int y)
 
 static void draw_battery_icon_charging(int x, int y, int pct)
 {
-    draw_battery_icon(x, y, pct);
-    draw_charging_bolt(x + 6, y - 2);
+    int bw = 18, bh = 8;
+    epaper_draw_rect(x, y, bw, bh, 0);
+    epaper_draw_rect(x + bw, y + 2, 2, bh - 4, 1);
+    int fill_w = ((bw - 2) * pct) / 100;
+    if (fill_w > 0) epaper_draw_rect(x + 1, y + 1, fill_w, bh - 2, 1);
+    int cx = x + bw / 2;
+    int cy = y + bh / 2;
+    epaper_draw_line(cx, cy - 3, cx - 2, cy);
+    epaper_draw_line(cx - 2, cy, cx + 2, cy);
+    epaper_draw_line(cx + 2, cy, cx - 1, cy + 3);
 }
 
 void ui_show_docked_screen(void)
