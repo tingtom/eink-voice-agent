@@ -27,6 +27,7 @@ static bool processing = false;
 static audio_mode_t current_mode = MODE_AGENT;
 static bool offline_recording = false;
 static bool pipeline_docked = false;
+static bool wake_word_checking = false;
 
 // Playback test buffer — accumulates audio during recording for speaker loopback
 #define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE / 2)  // 0.5s loopback buffer (32KB @16kHz)
@@ -112,7 +113,7 @@ static void vad_task(void *arg)
     bool in_vad_trigger = false;
 
     while (1) {
-        if (recording || pipeline_docked) {
+        if (recording || pipeline_docked || wake_word_checking) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
@@ -172,6 +173,7 @@ static void wake_word_task(void *arg)
 
         if (bits & AUDIO_EVENT_VAD_TRIGGERED) {
             ESP_LOGI(TAG, "Wake word checking started (VAD triggered)");
+            wake_word_checking = true;
             wake_word_checks = 0;
 
             while (wake_word_checks < AUDIO_MAX_WAKE_WORD_CHECKS) {
@@ -186,16 +188,11 @@ static void wake_word_task(void *arg)
                         break;
                     }
                     wake_word_checks++;
-
-                    int32_t energy = vad_compute_energy(buf, read);
-                    if (energy < AUDIO_VAD_THRESHOLD / 2) {
-                        ESP_LOGI(TAG, "Voice stopped, wake word not detected");
-                        break;
-                    }
                 }
                 vTaskDelay(pdMS_TO_TICKS(VAD_BURST_MS / 2));
             }
 
+            wake_word_checking = false;
             if (!recording) {
                 ESP_LOGI(TAG, "No wake word detected, returning to sleep");
             }
