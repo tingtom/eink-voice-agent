@@ -1,5 +1,6 @@
 #include <string.h>
 #include "esp_log.h"
+#include "driver/i2c_master.h"
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "app_config.h"
@@ -21,7 +22,7 @@ esp_err_t es8311_init(void)
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = I2C_PORT,
         .addr = ES8311_CODEC_DEFAULT_ADDR,
-        .bus_handle = bus_handle,
+        .bus_handle = (void *)bus_handle,
     };
     const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
     if (!ctrl_if) {
