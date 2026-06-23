@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "app_config.h"
 #include "wake_word.h"
 #include "tflite_learn_1037720_5.h"
@@ -167,26 +168,30 @@ extern "C" void wake_word_init(void)
     ESP_LOGI(TAG, "Initializing wake word model: '%s' (sensitivity=%.1f)",
              WAKE_WORD, sensitivity);
 
-    audio_buf = (int16_t *)heap_caps_malloc(MFE_INPUT_SAMPLES * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG, "Free heap: %" PRIu32 ", largest block: %" PRIu32,
+             (uint32_t)esp_get_free_heap_size(),
+             (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+    audio_buf = (int16_t *)malloc(MFE_INPUT_SAMPLES * sizeof(int16_t));
     if (!audio_buf) {
         ESP_LOGE(TAG, "Failed to allocate audio buffer (%d bytes)",
                  MFE_INPUT_SAMPLES * (int)sizeof(int16_t));
         return;
     }
 
-    tflite_arena = (uint8_t *)heap_caps_malloc(TFLITE_MODEL_ARENA_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    tflite_arena = (uint8_t *)malloc(TFLITE_MODEL_ARENA_SIZE);
     if (!tflite_arena) {
         ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)", TFLITE_MODEL_ARENA_SIZE);
-        heap_caps_free(audio_buf);
+        free(audio_buf);
         audio_buf = NULL;
         return;
     }
 
     if (!setup_tflite()) {
         ESP_LOGE(TAG, "TFLite setup failed");
-        heap_caps_free(tflite_arena);
+        free(tflite_arena);
         tflite_arena = NULL;
-        heap_caps_free(audio_buf);
+        free(audio_buf);
         audio_buf = NULL;
         return;
     }
