@@ -116,13 +116,21 @@ static const reg_cfg init_seq[] = {
 
 esp_err_t es8311_init(void)
 {
-    uint8_t id = 0;
-    esp_err_t ret = read_reg(0x40, &id);
+    uint8_t id1 = 0, id2 = 0, ver = 0;
+    esp_err_t ret = read_reg(0xFD, &id1);
+    ret |= read_reg(0xFE, &id2);
+    ret |= read_reg(0xFF, &ver);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "No ACK from ES8311 (I2C addr 0x%02X)", ES8311_I2C_ADDR);
         return ret;
     }
-    ESP_LOGI(TAG, "ES8311 chip ID = 0x%02X", id);
+    ESP_LOGI(TAG, "ES8311 chip ID1=0x%02X ID2=0x%02X ver=0x%02X", id1, id2, ver);
+
+    // Verify a write by reading back a register
+    uint8_t test_val = 0;
+    write_reg(0x44, 0x08);
+    read_reg(0x44, &test_val);
+    ESP_LOGI(TAG, "I2C write/read test: 0x44 = 0x%02X", test_val);
 
     for (size_t i = 0; i < sizeof(init_seq) / sizeof(init_seq[0]); i++) {
         ret = write_reg(init_seq[i].reg, init_seq[i].val);
@@ -131,6 +139,17 @@ esp_err_t es8311_init(void)
             return ret;
         }
     }
+
+    // Verify critical registers
+    uint8_t r2a, r09, r0a, r0e, r14, r0d;
+    read_reg(0x2A, &r2a);
+    read_reg(0x09, &r09);
+    read_reg(0x0A, &r0a);
+    read_reg(0x0E, &r0e);
+    read_reg(0x14, &r14);
+    read_reg(0x0D, &r0d);
+    ESP_LOGI(TAG, "Verify: 0x2A=%02X 0x09=%02X 0x0A=%02X 0x0E=%02X 0x14=%02X 0x0D=%02X",
+             r2a, r09, r0a, r0e, r14, r0d);
 
     ESP_LOGI(TAG, "ES8311 initialized (16 kHz, 16-bit, I2S slave)");
     return ESP_OK;
