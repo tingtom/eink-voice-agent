@@ -130,9 +130,8 @@ bool wifi_has_saved_creds(void)
 {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
-    char buf[4];
-    size_t len = sizeof(buf);
-    esp_err_t err = nvs_get_str(h, NVS_KEY_SSID, buf, &len);
+    size_t len = 0;
+    esp_err_t err = nvs_get_str(h, NVS_KEY_SSID, NULL, &len);
     nvs_close(h);
     return err == ESP_OK;
 }

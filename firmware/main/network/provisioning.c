@@ -160,15 +160,6 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// ── Catch-all HTTP handler for captive portal redirect ───────
-
-static esp_err_t catchall_get_handler(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, HTML_PAGE, strlen(HTML_PAGE));
-    return ESP_OK;
-}
-
 static void json_parse_str(const char *json, const char *key, char *out, size_t out_len)
 {
     const char *p = strstr(json, key);
@@ -246,10 +237,16 @@ esp_err_t provisioning_start_ap(void)
     return ESP_OK;
 }
 
+static void register_uri(httpd_handle_t s, const char *uri, httpd_method_t method, esp_err_t (*handler)(httpd_req_t *))
+{
+    httpd_uri_t h = { .uri = uri, .method = method, .handler = handler };
+    httpd_register_uri_handler(s, &h);
+}
+
 esp_err_t provisioning_start_server(void)
 {
     httpd_config_t httpd_cfg = HTTPD_DEFAULT_CONFIG();
-    httpd_cfg.max_uri_handlers = 6;
+    httpd_cfg.max_uri_handlers = 8;
     httpd_cfg.stack_size = 6144;
 
     if (httpd_start(&server, &httpd_cfg) != ESP_OK) {
@@ -257,13 +254,13 @@ esp_err_t provisioning_start_server(void)
         return ESP_FAIL;
     }
 
-    httpd_uri_t root_uri = { .uri = "/", .method = HTTP_GET, .handler = root_get_handler };
-    httpd_uri_t catchall_uri = { .uri = "/*", .method = HTTP_GET, .handler = catchall_get_handler };
-    httpd_uri_t config_uri = { .uri = "/config", .method = HTTP_POST, .handler = config_post_handler };
-
-    httpd_register_uri_handler(server, &root_uri);
-    httpd_register_uri_handler(server, &catchall_uri);
-    httpd_register_uri_handler(server, &config_uri);
+    register_uri(server, "/",                  HTTP_GET,  root_get_handler);
+    // Captive portal detection endpoints (iOS, Android, Windows)
+    register_uri(server, "/hotspot-detect.html", HTTP_GET,  root_get_handler);
+    register_uri(server, "/generate_204",       HTTP_GET,  root_get_handler);
+    register_uri(server, "/connecttest.txt",    HTTP_GET,  root_get_handler);
+    register_uri(server, "/favicon.ico",        HTTP_GET,  root_get_handler);
+    register_uri(server, "/config",            HTTP_POST, config_post_handler);
 
     start_dns_server();
 
