@@ -586,8 +586,6 @@ void app_main(void)
     ui_init();
     recordings_init();
 
-    audio_pipeline_init(); // I2S + wake word arena (before WiFi to avoid fragmentation)
-
     if (!wifi_has_saved_creds()) {
         ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");
         ui_show_boot_screen("Setup Mode");
@@ -636,6 +634,7 @@ void app_main(void)
         }
     }
 
+    audio_pipeline_init();
     ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
     button_set_callback(handle_button);
     button_set_longpress_callback(handle_longpress, 1500);

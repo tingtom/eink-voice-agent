@@ -8,6 +8,8 @@
 #include "app_config.h"
 #include "wake_word.h"
 #include "tflite_learn_1037720_5.h"
+#undef TFLITE_MODEL_ARENA_SIZE
+#define TFLITE_MODEL_ARENA_SIZE 49152  // 48KB — reduced from 162284 to fit ESP32-C6
 #include "model_ops.h"
 #include "model_metadata.h"
 #include "model_mfe.h"
@@ -19,10 +21,12 @@ static const char *TAG = "WAKE_WORD";
 #define INPUT_QUANT_SCALE  0.00390625f
 #define INPUT_QUANT_ZP     (-128)
 
-static int16_t *audio_buf = NULL;
+static int16_t audio_buf_storage[MFE_INPUT_SAMPLES];
+static int16_t *audio_buf = audio_buf_storage;
 static size_t audio_count = 0;
 
-static uint8_t *tflite_arena = NULL;
+static uint8_t tflite_arena_storage[TFLITE_MODEL_ARENA_SIZE];
+static uint8_t *tflite_arena = tflite_arena_storage;
 static const tflite::Model *tflite_model = NULL;
 static tflite::MicroMutableOpResolver<7> resolver;
 static tflite::MicroInterpreter *interpreter = NULL;
@@ -168,38 +172,8 @@ extern "C" void wake_word_init(void)
     ESP_LOGI(TAG, "Initializing wake word model: '%s' (sensitivity=%.1f)",
              WAKE_WORD, sensitivity);
 
-    ESP_LOGI(TAG, "Heap before alloc: free=%" PRIu32 ", largest=%" PRIu32,
-             (uint32_t)esp_get_free_heap_size(),
-             (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-
-    if (!audio_buf) {
-        audio_buf = (int16_t *)malloc(MFE_INPUT_SAMPLES * sizeof(int16_t));
-        if (!audio_buf) {
-            ESP_LOGE(TAG, "Failed to allocate audio buffer (%d bytes)",
-                     MFE_INPUT_SAMPLES * (int)sizeof(int16_t));
-        }
-    }
-
-    if (!tflite_arena) {
-        tflite_arena = (uint8_t *)malloc(TFLITE_MODEL_ARENA_SIZE);
-        if (!tflite_arena) {
-            ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)", TFLITE_MODEL_ARENA_SIZE);
-            free(audio_buf);
-            audio_buf = NULL;
-        }
-    }
-
-    if (!audio_buf || !tflite_arena) {
-        ESP_LOGE(TAG, "Buffers not allocated — wake word disabled");
-        return;
-    }
-
     if (!setup_tflite()) {
         ESP_LOGE(TAG, "TFLite setup failed");
-        free(tflite_arena);
-        tflite_arena = NULL;
-        free(audio_buf);
-        audio_buf = NULL;
         return;
     }
 

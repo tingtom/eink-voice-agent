@@ -56,7 +56,7 @@
 
 // ── Audio ────────────────────────────────────────────────────
 #define AUDIO_SAMPLE_RATE   16000
-#define AUDIO_BUFFER_SIZE   4096
+#define AUDIO_BUFFER_SIZE   2048
 #define AUDIO_CHANNELS      1
 
 // ── Voice Activity Detection ─────────────────────────────────
