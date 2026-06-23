@@ -21,7 +21,7 @@ static const char *TAG = "WAKE_WORD";
 static int16_t audio_buf[MFE_INPUT_SAMPLES];
 static size_t audio_count = 0;
 
-static uint8_t *tflite_arena = NULL;
+static uint8_t tflite_arena[TFLITE_MODEL_ARENA_SIZE];
 static const tflite::Model *tflite_model = NULL;
 static tflite::MicroMutableOpResolver<7> resolver;
 static tflite::MicroInterpreter *interpreter = NULL;
@@ -130,14 +130,6 @@ static bool setup_tflite(void)
     if (tflite_model->version() != TFLITE_SCHEMA_VERSION) {
         ESP_LOGE(TAG, "Model schema version %d != %d",
                  (int)tflite_model->version(), (int)TFLITE_SCHEMA_VERSION);
-        return false;
-    }
-
-    tflite_arena = (uint8_t *)heap_caps_malloc(
-        TFLITE_MODEL_ARENA_SIZE, MALLOC_CAP_DEFAULT);
-    if (!tflite_arena) {
-        ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)",
-                 TFLITE_MODEL_ARENA_SIZE);
         return false;
     }
 

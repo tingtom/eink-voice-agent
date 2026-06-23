@@ -239,9 +239,9 @@ static void draw_charging_bolt(int x, int y)
 void ui_show_docked_screen(void)
 {
     epaper_clear();
-    draw_charging_bolt(DISPLAY_WIDTH / 2 - 4, 50);
-    int tw = epaper_text_width("Sleeping & Charging", 12);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 80, "Sleeping & Charging", 12);
+    draw_charging_bolt(DISPLAY_WIDTH / 2 - 4, 40);
+    int tw = epaper_text_width("Sleep & Charge", 12);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 80, "Sleep & Charge", 12);
     char pct[8];
     snprintf(pct, sizeof(pct), "%d%%", battery);
     int tw2 = epaper_text_width(pct, 16);
