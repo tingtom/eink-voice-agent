@@ -188,52 +188,9 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                     mode = msg.get("mode", "agent")
                     chunks = self._audio_buffers.pop(session, [])
                     full_audio = "".join(chunks)
-
-                    if mode == "transcribe":
-                        text = _transcribe_audio(full_audio)
-                        timestamp = __import__("datetime").datetime.now().strftime(
-                            "%Y-%m-%d_%H-%M-%S"
-                        )
-                        note_file = NOTES_DIR / f"note_{timestamp}.txt"
-                        note_file.write_text(text)
-                        _log_activity({"type": "message", "direction": "in",
-                                       "content": f"[voice note] {text[:500]}".strip(),
-                                       "session_id": session})
-                        reply = (
-                            f"Transcribed note saved:\n\n{text[:180]}"
-                        )
-                        await ws.send(json.dumps({"type": "response", "data": reply}))
-
-                    elif mode == "todo":
-                        if full_audio:
-                            text = _transcribe_audio(full_audio)
-                        else:
-                            text = "list my todos"
-                        source = self.build_source(
-                            chat_id=chat_id, chat_name=f"Device-{device_id}",
-                            chat_type="dm", user_id=device_id, user_name=device_id,
-                        )
-                        event = MessageEvent(
-                            text=text,
-                            message_type=MessageType.TEXT,
-                            source=source,
-                            message_id=session,
-                        )
-                        await self.handle_message(event)
-
-                    else:
-                        source = self.build_source(
-                            chat_id=chat_id, chat_name=f"Device-{device_id}",
-                            chat_type="dm", user_id=device_id, user_name=device_id,
-                        )
-                        event = MessageEvent(
-                            text="[audio input]",
-                            message_type=MessageType.TEXT,
-                            source=source,
-                            message_id=session,
-                            extra_data={"audio_data": full_audio},
-                        )
-                        await self.handle_message(event)
+                    asyncio.create_task(
+                        self._process_end(session, mode, full_audio, chat_id, device_id)
+                    )
 
                 elif msg_type in ("text",):
                     if not chat_id:
@@ -275,6 +232,54 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             if chat_id:
                 self._ws_by_chat.pop(chat_id, None)
                 _log_activity({"type": "disconnect", "detail": f"Device '{device_id}' disconnected"})
+
+    async def _process_end(self, session, mode, full_audio, chat_id, device_id):
+        try:
+            if mode == "transcribe":
+                text = _transcribe_audio(full_audio)
+                timestamp = __import__("datetime").datetime.now().strftime(
+                    "%Y-%m-%d_%H-%M-%S"
+                )
+                note_file = NOTES_DIR / f"note_{timestamp}.txt"
+                note_file.write_text(text)
+                _log_activity({"type": "message", "direction": "in",
+                               "content": f"[voice note] {text[:500]}".strip(),
+                               "session_id": session})
+                reply = f"Transcribed note saved:\n\n{text[:180]}"
+                await self.send(chat_id, reply)
+
+            elif mode == "todo":
+                if full_audio:
+                    text = _transcribe_audio(full_audio)
+                else:
+                    text = "list my todos"
+                source = self.build_source(
+                    chat_id=chat_id, chat_name=f"Device-{device_id}",
+                    chat_type="dm", user_id=device_id, user_name=device_id,
+                )
+                event = MessageEvent(
+                    text=text,
+                    message_type=MessageType.TEXT,
+                    source=source,
+                    message_id=session,
+                )
+                await self.handle_message(event)
+
+            else:
+                source = self.build_source(
+                    chat_id=chat_id, chat_name=f"Device-{device_id}",
+                    chat_type="dm", user_id=device_id, user_name=device_id,
+                )
+                event = MessageEvent(
+                    text="[audio input]",
+                    message_type=MessageType.TEXT,
+                    source=source,
+                    message_id=session,
+                    extra_data={"audio_data": full_audio},
+                )
+                await self.handle_message(event)
+        except Exception as e:
+            logger.error("Background processing error: %s", e)
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
         ws = self._ws_by_chat.get(chat_id)

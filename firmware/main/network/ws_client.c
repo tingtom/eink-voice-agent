@@ -178,3 +178,11 @@ bool ws_client_is_connected(void)
 {
     return client && esp_websocket_client_is_connected(client);
 }
+
+void ws_client_reconnect(void)
+{
+    if (client && !esp_websocket_client_is_connected(client)) {
+        ESP_LOGW(TAG, "WebSocket not connected, forcing reconnect");
+        esp_websocket_client_start(client);
+    }
+}

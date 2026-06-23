@@ -10,3 +10,4 @@ esp_err_t ws_client_send_text(const char *text);
 esp_err_t ws_client_send_json(const char *json_str);
 void ws_client_set_callback(ws_message_callback_t cb);
 bool ws_client_is_connected(void);
+void ws_client_reconnect(void);

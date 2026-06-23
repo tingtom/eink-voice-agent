@@ -28,6 +28,11 @@ static audio_mode_t current_mode = MODE_AGENT;
 static bool offline_recording = false;
 static bool pipeline_docked = false;
 
+// Playback test buffer — accumulates audio during recording for speaker loopback
+#define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE * 30)
+static int16_t *playback_buf = NULL;
+static size_t playback_len = 0;
+
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
 #define AUDIO_EVENT_WAKE_WORD      BIT1

@@ -659,6 +659,7 @@ void app_main(void)
     int telemetry_ticks = 0;
 
     while (1) {
+        ws_client_reconnect();
         uint8_t battery = power_get_battery_pct();
         ui_update_battery(battery);
         ui_update_wifi_status(wifi_is_connected());
