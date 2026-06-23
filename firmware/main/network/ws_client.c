@@ -105,7 +105,13 @@ esp_err_t ws_client_init(const char *url, const char *token)
 
     esp_websocket_client_config_t cfg = {
         .uri = connect_url,
-        .keep_alive_interval = WS_PING_INTERVAL_SEC,
+        .ping_interval_sec = 15,
+        .pingpong_timeout_sec = 60,
+        .disable_pingpong_discon = true,
+        .keep_alive_enable = true,
+        .keep_alive_idle = 30,
+        .keep_alive_interval = 10,
+        .keep_alive_count = 3,
         .network_timeout_ms = WS_TIMEOUT_MS,
         .disable_auto_reconnect = false,
         .reconnect_timeout_ms = WS_RECONNECT_INTERVAL_MS,
