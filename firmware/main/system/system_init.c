@@ -121,6 +121,7 @@ void system_init(void)
 
     board_power_epd_on();
     board_power_audio_on();
+    vTaskDelay(pdMS_TO_TICKS(100));    // wait for ES8311 power-up
     board_power_vbat_on();
 
     ESP_LOGI(TAG, "System initialized");
