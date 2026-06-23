@@ -48,7 +48,7 @@ static const reg_cfg init_seq[] = {
     {0x31, 0x08},   // LDO D2A enable
     {0x30, 0x00},   // LDO control
     {0x29, 0x64},   // ADC/DAC bias current
-    {0x2A, 0x74},   // MIC_LDO enable, MIC bias on (bit 2=MICBIAS_EN)
+    {0x2A, 0x7C},   // MIC_LDO_EN, MIC1L input enable, MICBIAS_EN
 
     // Power on all analog stages
     {0x2B, 0x14},   // Output stage power
@@ -60,10 +60,10 @@ static const reg_cfg init_seq[] = {
     {0x02, 0x10},   // FS_SEL=001 (16kHz at MCLK/LRCK=256)
     {0x03, 0x04},   // CKM auto clock detection
 
-    // ADC input path — single-ended MIC1, 16-bit left-justified, +18dB PGA
+    // ADC input path — single-ended MIC1, Philips I2S 16-bit, +18dB PGA
     {0x04, 0x06},   // INPUT_SEL=00(MIC1), PGA_GAIN=11(+18dB)
     {0x05, 0x00},   // ADC digital volume = 0dB
-    {0x06, 0x70},   // Left-justified, 16-bit
+    {0x06, 0x00},   // ADC format: Philips I2S, 16-bit (was 0x70 left-justified)
 
     // ALC off
     {0x08, 0x00},
@@ -74,7 +74,7 @@ static const reg_cfg init_seq[] = {
     // DAC output path
     {0x14, 0x1A},   // DAC enable, de-emph off, soft-ramp off, unmute
     {0x15, 0x00},   // DAC digital volume = 0dB
-    {0x16, 0x70},   // Left-justified, 16-bit
+    {0x16, 0x00},   // DAC format: Philips I2S, 16-bit (was 0x70 left-justified)
 
     // Misc
     {0x28, 0x00},   // Analog low power off
@@ -82,7 +82,7 @@ static const reg_cfg init_seq[] = {
     {0x21, 0xF0},   // GPIO all output
 
     // Final volume reset
-    {0x05, 0x10},   // ADC volume = 0dB
+    {0x05, 0x00},   // ADC volume = 0dB
     {0x15, 0x00},   // DAC volume = 0dB
 };
 

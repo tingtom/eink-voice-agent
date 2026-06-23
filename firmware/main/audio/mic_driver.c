@@ -9,6 +9,7 @@ static const char *TAG = "MIC";
 
 static i2s_chan_handle_t mic_chan = NULL;
 static bool is_running = false;
+static int mic_dbg_counter = 0;
 
 void mic_set_handle(i2s_chan_handle_t handle)
 {
@@ -45,5 +46,28 @@ esp_err_t mic_read(int16_t *buffer, size_t samples, size_t *read)
     if (ret == ESP_OK && read) {
         *read = bytes_read / sizeof(int16_t);
     }
+
+    // Debug: log mic levels every ~100 reads (~1s at 50ms intervals)
+    mic_dbg_counter++;
+    if (mic_dbg_counter % 100 == 0 && *read > 0) {
+        // First 4 samples
+        ESP_LOGI(TAG, "mic samples[0..3]: %d %d %d %d",
+                 buffer[0], buffer[1], buffer[2], buffer[3]);
+        // Average absolute level
+        int64_t sum_abs = 0;
+        for (size_t i = 0; i < *read; i++) {
+            int32_t s = buffer[i];
+            if (s < 0) s = -s;
+            sum_abs += s;
+        }
+        int32_t avg = (int32_t)(sum_abs / *read);
+        // Check if all zeros (suggests no mic data / wrong format)
+        int zeros = 0;
+        for (size_t i = 0; i < (*read < 32 ? *read : 32); i++) {
+            if (buffer[i] == 0) zeros++;
+        }
+        ESP_LOGI(TAG, "mic avg_abs=%ld  zero_in_first_32=%d/32  read=%u", (long)avg, zeros, (unsigned)*read);
+    }
+
     return ret;
 }

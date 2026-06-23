@@ -109,7 +109,7 @@ INMP441 → I2S DMA → Ring Buffer
 
 ## Wake Word Training (Edge Impulse)
 
-1. Collect audio samples of wake phrase (e.g., "Hey Merlin" or custom)
+1. Collect audio samples of wake phrase (e.g., "Hi Jeff" or custom)
 2. Train keyword spotting model in Edge Impulse
 3. Export as TFLite model for ESP-IDF
 4. Target: <100ms inference, <50KB model size
@@ -122,7 +122,7 @@ INMP441 → I2S DMA → Ring Buffer
 ┌──────────────────┐
 │  ◉ Ready         │  ← Status dot (green=connected, red=disconnected)
 │                  │
-│   [Merlin]       │  ← Device name
+│   [Jeff]       │  ← Device name
 │                  │
 │  🔋 87%  📶 ████ │  ← Battery + WiFi strength
 │                  │

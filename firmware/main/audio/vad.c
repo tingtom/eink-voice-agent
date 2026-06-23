@@ -23,6 +23,8 @@ void vad_init(void)
              VAD_FRAME_SAMPLES, VAD_ENERGY_HIGH, VAD_ENERGY_LOW);
 }
 
+static int vad_dbg_counter = 0;
+
 int32_t vad_compute_energy(const int16_t *samples, size_t count)
 {
     int64_t sum = 0;
@@ -31,6 +33,15 @@ int32_t vad_compute_energy(const int16_t *samples, size_t count)
         sum += (int64_t)s * s;
     }
     int32_t rms = (int32_t)(sqrt((double)sum / count) + 0.5);
+
+    // Log energy periodically (~every 50 frames)
+    vad_dbg_counter++;
+    if (vad_dbg_counter % 50 == 0) {
+        ESP_LOGI(TAG, "energy=%ld  threshold_high=%d  low=%d  voice=%s",
+                 (long)rms, VAD_ENERGY_HIGH, VAD_ENERGY_LOW,
+                 voice_active ? "Y" : "N");
+    }
+
     return rms;
 }
 

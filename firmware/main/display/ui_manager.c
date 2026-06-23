@@ -62,7 +62,7 @@ void ui_show_boot_screen(const char *device_name)
 void ui_show_home_screen(void)
 {
     epaper_clear();
-    epaper_draw_text(10, 60, "Say 'Hey Merlin'", 12);
+    epaper_draw_text(10, 60, "Say 'Hi Jeff'", 12);
     epaper_draw_text(10, 80, "or press SELECT", 12);
     draw_status_bar();
     epaper_full_refresh();

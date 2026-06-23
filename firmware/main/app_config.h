@@ -2,7 +2,7 @@
 #define APP_CONFIG_H
 
 // ── Device Identity ──────────────────────────────────────────
-#define DEVICE_NAME         "Merlin"
+#define DEVICE_NAME         "Jeff"
 #define DEVICE_ID           "eink-agent-001"
 #define DEVICE_AUTH_TOKEN   "change-me-in-production"
 
@@ -65,9 +65,9 @@
 #define AUDIO_MAX_WAKE_WORD_CHECKS  40
 
 // ── Wake Word ────────────────────────────────────────────────
-#define WAKE_WORD           "hey merlin"
+#define WAKE_WORD           "hi jeff"
 #define WAKE_WORD_SENSITIVITY  0.7f
-#define WAKE_WORD_MODEL_PATH   "/models/wake_word_model.h"
+#define WAKE_WORD_MODEL_PATH   "/models/tflite_learn_1037720_5.h"
 
 // ── Battery ──────────────────────────────────────────────────
 #define BATTERY_MIN_MV      3300

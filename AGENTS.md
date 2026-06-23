@@ -59,10 +59,10 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Precomputed MFE tables: Hann window (256), Mel filterbank (40 × 129)
 - Model binary (615KB) converted to C array in `models/tflite_learn_1037720_5.c`
 - Dependencies added: `espressif/esp-tflite-micro` v1.3.7, `espressif/esp-nn` v1.2.3
+- **ES8311 audio fix (ADC)**: `0x2A` set to `0x7C` — enables MIC1L input to ADC (was disabled, bit 3 = 0 in old `0x74`)
+- **ES8311 format fix**: `0x06`/`0x16` changed from `0x70` (left-justified) to `0x00` (Philips I2S) — now matches I2S master Philips format (`bit_shift=true`)
+- **Renamed device**: `Merlin` → `Jeff`, wake word `"hey merlin"` → `"hi jeff"`
 - Build verified: firmware compiles successfully
-
-### In Progress
-- (none)
 
 ### Blocked
 - (none)

@@ -119,7 +119,13 @@ static void vad_task(void *arg)
 
         size_t read = 0;
         esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
-        if (ret != ESP_OK || read == 0) {
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "mic_read failed: %s (confirm=%d)", esp_err_to_name(ret), confirm_count);
+            vTaskDelay(pdMS_TO_TICKS(VAD_BURST_MS));
+            continue;
+        }
+        if (read == 0) {
+            ESP_LOGW(TAG, "mic_read returned 0 samples");
             vTaskDelay(pdMS_TO_TICKS(VAD_BURST_MS));
             continue;
         }

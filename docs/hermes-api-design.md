@@ -177,7 +177,7 @@ Authorization: Bearer device-api-token
 ```
 GET /api/device/config
 → {
-  "wake_word": "hey merlin",
+  "wake_word": "hi jeff",
   "wake_word_sensitivity": 0.7,
   "tts_voice": "edge-tts-en-GB-Sonia",
   "display_brightness": 100,
