@@ -205,13 +205,11 @@ static void wake_word_task(void *arg)
 
 static void audio_i2s_duplex_init(void)
 {
-    int dma_frames = AUDIO_BUFFER_SIZE;
-    if (dma_frames > 1024) dma_frames = 1024;
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 8,
-        .dma_frame_num = dma_frames,
+        .dma_desc_num = 4,
+        .dma_frame_num = 512,
         .auto_clear = true,
     };
 
