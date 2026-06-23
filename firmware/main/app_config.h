@@ -9,8 +9,8 @@
 // ── WiFi (credentials provisioned to NVS at runtime) ─────────
 
 // ── Hermes Server ────────────────────────────────────────────
-#define HERMES_HTTP_URL     "http://192.168.1.10:8123"
-#define HERMES_WS_URL       "ws://192.168.1.10:8123/api/device/ws"
+#define HERMES_HTTP_URL     "http://192.168.1.25:9119"
+#define HERMES_WS_URL       "ws://192.168.1.25:8123/api/device/ws"
 
 // ── Pin Definitions (Waveshare ESP32-C6-ePaper-1.54) ────────
 // I2C Bus (shared by TCA9554, PCF85063 RTC, SHTC3 sensor)
