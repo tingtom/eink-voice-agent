@@ -108,6 +108,27 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             logger.error("pip install websockets")
             return False
 
+        # Advertise via mDNS so ESP32 can discover us
+        self._zeroconf = None
+        try:
+            from zeroconf import Zeroconf, ServiceInfo
+            import socket
+            host_ip = socket.gethostbyname(socket.gethostname())
+            self._zeroconf = Zeroconf()
+            self._service_info = ServiceInfo(
+                "_eink-voice-gateway._tcp.local.",
+                f"EInkVoiceGateway._eink-voice-gateway._tcp.local.",
+                addresses=[socket.inet_aton(host_ip)],
+                port=self._port,
+                properties={"path": "/api/device/ws"},
+            )
+            self._zeroconf.register_service(self._service_info)
+            logger.info("mDNS advertised _eink-voice-gateway._tcp on %s:%s", host_ip, self._port)
+        except ImportError:
+            logger.warning("pip install zeroconf for mDNS auto-discovery")
+        except Exception as e:
+            logger.warning("mDNS registration failed: %s", e)
+
         self._server = await websockets.serve(
             self._handle_ws, self._host, self._port,
         )
@@ -116,6 +137,12 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         return True
 
     async def disconnect(self) -> None:
+        if self._zeroconf:
+            try:
+                self._zeroconf.unregister_service(self._service_info)
+                self._zeroconf.close()
+            except Exception:
+                pass
         if self._server:
             self._server.close()
             await self._server.wait_closed()

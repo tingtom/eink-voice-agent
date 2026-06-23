@@ -5,6 +5,8 @@
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "mdns.h"
+#include "lwip/inet.h"
 #include "app_config.h"
 #include "base64.h"
 #include "ws_client.h"
@@ -15,6 +17,38 @@ static esp_websocket_client_handle_t client = NULL;
 static ws_message_callback_t message_cb = NULL;
 static bool connected = false;
 static char auth_token[128] = {0};
+
+static char discovered_url[256] = {0};
+
+static esp_err_t discover_gateway(void)
+{
+    mdns_result_t *results = NULL;
+    esp_err_t err = mdns_query_ptr("_eink-voice-gateway", "_tcp", 3000, 1, &results);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS gateway query failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (!results) {
+        ESP_LOGW(TAG, "No Hermes gateway found via mDNS");
+        return ESP_FAIL;
+    }
+
+    mdns_result_t *r = results;
+    if (r->addr && r->addr->addr.type == IPADDR_TYPE_V4) {
+        char ip_str[16];
+        esp_ip4_addr_t ip = r->addr->addr.u_addr.ip4;
+        snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip));
+        snprintf(discovered_url, sizeof(discovered_url),
+                 "ws://%s:%d/api/device/ws", ip_str, r->port);
+        ESP_LOGI(TAG, "Discovered gateway at %s", discovered_url);
+    } else {
+        ESP_LOGW(TAG, "Gateway found but no IPv4 address");
+        mdns_query_results_free(results);
+        return ESP_FAIL;
+    }
+    mdns_query_results_free(results);
+    return ESP_OK;
+}
 
 static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *data)
 {
@@ -66,8 +100,14 @@ esp_err_t ws_client_init(const char *url, const char *token)
 {
     strncpy(auth_token, token, sizeof(auth_token) - 1);
 
+    // Try mDNS discovery first; fall back to compiled-in URL
+    const char *connect_url = url;
+    if (discover_gateway() == ESP_OK) {
+        connect_url = discovered_url;
+    }
+
     esp_websocket_client_config_t cfg = {
-        .uri = url,
+        .uri = connect_url,
         .keep_alive_interval = WS_PING_INTERVAL_SEC,
         .network_timeout_ms = WS_TIMEOUT_MS,
         .disable_auto_reconnect = false,
@@ -83,7 +123,7 @@ esp_err_t ws_client_init(const char *url, const char *token)
     ESP_ERROR_CHECK(esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, ws_event_handler, NULL));
     ESP_ERROR_CHECK(esp_websocket_client_start(client));
 
-    ESP_LOGI(TAG, "WebSocket client initialized, connecting to %s", url);
+    ESP_LOGI(TAG, "WebSocket client initialized, connecting to %s", connect_url);
     return ESP_OK;
 }
 

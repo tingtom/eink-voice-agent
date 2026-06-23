@@ -8,7 +8,7 @@
 
 // ── WiFi (credentials provisioned to NVS at runtime) ─────────
 
-// ── Hermes Server ────────────────────────────────────────────
+// ── Hermes Server (overridden by mDNS discovery if available) ─
 #define HERMES_HTTP_URL     "http://192.168.1.10:8123"
 #define HERMES_WS_URL       "ws://192.168.1.10:8123/api/device/ws"
 
