@@ -336,11 +336,8 @@ static void handle_button(button_id_t btn)
     }
 
     if (current_app_mode == APP_MODE_HOME) {
-        if (btn == BUTTON_UP && menu_selection > 0) {
-            menu_selection--;
-            ui_show_menu(menu_items, menu_count, menu_selection);
-        } else if (btn == BUTTON_DOWN && menu_selection < menu_count - 1) {
-            menu_selection++;
+        if (btn == BUTTON_BACK) {
+            menu_selection = (menu_selection + 1) % menu_count;
             ui_show_menu(menu_items, menu_count, menu_selection);
         } else if (btn == BUTTON_SELECT) {
             enter_mode(menu_mode_map[menu_selection]);
@@ -361,19 +358,21 @@ static void handle_button(button_id_t btn)
         if (count == 0) { return_home(); return; }
 
         if (current_sub == SUB_NOTE_LIST) {
-            if (btn == BUTTON_UP) { notes_sel--; draw_note_list(); }
-            else if (btn == BUTTON_DOWN) { notes_sel++; draw_note_list(); }
-            else if (btn == BUTTON_SELECT) {
+            if (btn == BUTTON_BACK) {
+                int count = recording_count();
+                if (count > 0) notes_sel = (notes_sel + 1) % count;
+                draw_note_list();
+            } else if (btn == BUTTON_SELECT) {
                 current_sub = SUB_NOTE_DETAIL;
                 draw_note_detail(notes_sel);
             }
         } else if (current_sub == SUB_NOTE_DETAIL) {
-            if (btn == BUTTON_SELECT) {
-                recording_play(notes_sel);
-                draw_note_detail(notes_sel);
-            } else if (btn == BUTTON_UP || btn == BUTTON_DOWN) {
+            if (btn == BUTTON_BACK) {
                 current_sub = SUB_NOTE_LIST;
                 draw_note_list();
+            } else if (btn == BUTTON_SELECT) {
+                recording_play(notes_sel);
+                draw_note_detail(notes_sel);
             }
         }
         return;

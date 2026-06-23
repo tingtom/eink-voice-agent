@@ -364,12 +364,7 @@ void mode_games_handle_button(int btn)
     eye_frame++;
 
     switch (btn) {
-    case 0: // BUTTON_UP
-        sel = (sel > 0) ? sel - 1 : ACTION_COUNT - 1;
-        draw_game_screen();
-        break;
-
-    case 1: // BUTTON_DOWN
+    case 1: // BUTTON_BACK
         sel = (sel < ACTION_COUNT - 1) ? sel + 1 : 0;
         draw_game_screen();
         break;
