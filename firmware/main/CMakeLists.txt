@@ -49,6 +49,7 @@ idf_component_register(
         spi_flash
         nvs_flash
         driver
+        esp_driver_i2c
         esp_driver_i2s
         esp_timer
         fatfs
