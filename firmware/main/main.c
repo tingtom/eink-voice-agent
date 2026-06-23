@@ -19,7 +19,6 @@
 #include "buttons.h"
 #include "audio_pipeline.h"
 #include "vad.h"
-#include "wake_word.h"
 #include "mic_driver.h"
 #include "ws_client.h"
 #include "power_mgmt.h"
@@ -557,8 +556,6 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Device: %s", DEVICE_NAME);
 
-    wake_word_prealloc();
-
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -588,6 +585,8 @@ void app_main(void)
     epaper_init();
     ui_init();
     recordings_init();
+
+    audio_pipeline_init(); // I2S + wake word arena (before WiFi to avoid fragmentation)
 
     if (!wifi_has_saved_creds()) {
         ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");
@@ -637,7 +636,6 @@ void app_main(void)
         }
     }
 
-    audio_pipeline_init();
     ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
     button_set_callback(handle_button);
     button_set_longpress_callback(handle_longpress, 1500);
