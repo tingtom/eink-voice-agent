@@ -61,7 +61,7 @@ static const reg_cfg init_seq[] = {
     {0x03, 0x04},   // CKM auto clock detection
 
     // ADC input path — single-ended MIC1, 16-bit left-justified
-    {0x04, 0x10},   // PGA gain = 0dB, input = MIC1
+    {0x04, 0x3A},   // PGA enable, +18dB, MIC1 single-ended with MICBIAS
     {0x05, 0x00},   // ADC digital volume = 0dB
     {0x06, 0x70},   // Left-justified, 16-bit
 

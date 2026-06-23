@@ -10,45 +10,14 @@ static const char *TAG = "MIC";
 static i2s_chan_handle_t mic_chan = NULL;
 static bool is_running = false;
 
+void mic_set_handle(i2s_chan_handle_t handle)
+{
+    mic_chan = handle;
+}
+
 void mic_init(void)
 {
-    i2s_chan_config_t chan_cfg = {
-        .id = I2S_PORT,
-        .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 8,
-        .dma_frame_num = AUDIO_BUFFER_SIZE,
-        .auto_clear = true,
-    };
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &mic_chan));
-
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = {
-            .sample_rate_hz = AUDIO_SAMPLE_RATE,
-            .clk_src = I2S_CLK_SRC_DEFAULT,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-        },
-        .slot_cfg = {
-            .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = I2S_STD_SLOT_LEFT,
-            .ws_width = 16,
-            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
-            .bit_shift = true,
-        },
-        .gpio_cfg = {
-            .mclk = I2S_MCLK_GPIO,
-            .bclk = I2S_BCLK_GPIO,
-            .ws = I2S_WS_GPIO,
-            .dout = I2S_GPIO_UNUSED,
-            .din = I2S_DIN_GPIO,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false,
-            },
-        },
-    };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(mic_chan, &std_cfg));
-    ESP_LOGI(TAG, "Microphone initialized (I2S, %d Hz, mono)", AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "Microphone ready (I2S, %d Hz, mono)", AUDIO_SAMPLE_RATE);
 }
 
 void mic_start(void)

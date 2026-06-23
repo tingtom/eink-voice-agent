@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/i2s_std.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -183,11 +184,58 @@ static void wake_word_task(void *arg)
     }
 }
 
+static void audio_i2s_duplex_init(void)
+{
+    i2s_chan_config_t chan_cfg = {
+        .id = I2S_PORT,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = 8,
+        .dma_frame_num = AUDIO_BUFFER_SIZE,
+        .auto_clear = true,
+    };
+
+    i2s_chan_handle_t tx = NULL, rx = NULL;
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx, &rx));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = AUDIO_SAMPLE_RATE,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+        },
+        .slot_cfg = {
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = 16,
+            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
+            .bit_shift = true,
+        },
+        .gpio_cfg = {
+            .mclk = I2S_MCLK_GPIO,
+            .bclk = I2S_BCLK_GPIO,
+            .ws = I2S_WS_GPIO,
+            .dout = I2S_DOUT_GPIO,
+            .din = I2S_DIN_GPIO,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx, &std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx, &std_cfg));
+    speaker_set_handle(tx);
+    mic_set_handle(rx);
+
+    ESP_LOGI(TAG, "I2S duplex initialized (%d Hz, mono)", AUDIO_SAMPLE_RATE);
+}
+
 void audio_pipeline_init(void)
 {
     ringbuffer_init(&audio_rb, AUDIO_BUFFER_SIZE * 4);
-    mic_init();
-    speaker_init();
+    audio_i2s_duplex_init();
     ESP_ERROR_CHECK(es8311_init());
     wake_word_init();
     vad_init();

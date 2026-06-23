@@ -4,6 +4,8 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,10 +20,22 @@ static const char *TAG = "POWER";
 static int64_t last_activity_time = 0;
 static bool initialized = false;
 static adc_oneshot_unit_handle_t adc_handle = NULL;
+static adc_cali_handle_t cali_handle = NULL;
 static int32_t wake_count = 0;
 
 void power_init(void)
 {
+    adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
+    };
+    esp_err_t cali_ret = adc_cali_create_scheme_curve_fitting(&cali_cfg, &cali_handle);
+    if (cali_ret != ESP_OK) {
+        ESP_LOGW(TAG, "ADC calibration not available, using raw values");
+        cali_handle = NULL;
+    }
+
     adc_oneshot_unit_init_cfg_t unit_cfg = {
         .unit_id = ADC_UNIT_1,
     };
@@ -61,7 +75,13 @@ static int read_battery_mv(void)
         ESP_LOGW(TAG, "ADC read failed: %s", esp_err_to_name(ret));
         return BATTERY_MIN_MV;
     }
-    return (raw * BATTERY_MAX_MV) / 4095;
+    int mv = 0;
+    if (cali_handle && adc_cali_raw_to_voltage(cali_handle, raw, &mv) == ESP_OK) {
+        mv *= 2; // voltage divider: VBAT = 2 × ADC voltage
+    } else {
+        mv = (raw * BATTERY_MAX_MV) / 4095;
+    }
+    return mv;
 }
 
 uint8_t power_get_battery_pct(void)

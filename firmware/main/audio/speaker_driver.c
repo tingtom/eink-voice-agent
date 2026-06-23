@@ -13,45 +13,14 @@ static i2s_chan_handle_t spk_chan = NULL;
 static bool is_playing = false;
 static uint8_t volume = 80;
 
+void speaker_set_handle(i2s_chan_handle_t handle)
+{
+    spk_chan = handle;
+}
+
 void speaker_init(void)
 {
-    i2s_chan_config_t chan_cfg = {
-        .id = I2S_PORT,
-        .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 8,
-        .dma_frame_num = 1024,
-        .auto_clear = true,
-    };
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &spk_chan, NULL));
-
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = {
-            .sample_rate_hz = AUDIO_SAMPLE_RATE,
-            .clk_src = I2S_CLK_SRC_DEFAULT,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-        },
-        .slot_cfg = {
-            .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = I2S_STD_SLOT_LEFT,
-            .ws_width = 16,
-            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
-            .bit_shift = true,
-        },
-        .gpio_cfg = {
-            .mclk = I2S_MCLK_GPIO,
-            .bclk = I2S_BCLK_GPIO,
-            .ws = I2S_WS_GPIO,
-            .dout = I2S_DOUT_GPIO,
-            .din = I2S_GPIO_UNUSED,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false,
-            },
-        },
-    };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(spk_chan, &std_cfg));
-    ESP_LOGI(TAG, "Speaker initialized (I2S, %d Hz)", AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "Speaker ready (I2S, %d Hz)", AUDIO_SAMPLE_RATE);
 }
 
 esp_err_t speaker_play(const int16_t *audio, size_t samples)

@@ -93,6 +93,8 @@ void ui_show_recording_screen(void)
     epaper_partial_refresh();
 }
 
+static int prev_heights[12] = {0};
+
 void ui_update_recording_viz(int32_t energy)
 {
     int bar_count = 12;
@@ -104,11 +106,19 @@ void ui_update_recording_viz(int32_t energy)
     int base_y = 55;
 
     for (int i = 0; i < bar_count; i++) {
-        int h = (energy * max_h) / 30000;
+        float t = (float)(i + 1) / bar_count;
+        int h = (int)((energy * max_h * t) / 30000);
         if (h < 2) h = 2;
         if (h > max_h) h = max_h;
+
         int x = start_x + i * (bar_w + gap);
-        epaper_draw_rect(x, base_y + (max_h - h), bar_w, h, 1);
+        if (h > prev_heights[i]) {
+            epaper_draw_rect(x, base_y + (max_h - h), bar_w, h, 1);
+        } else if (h < prev_heights[i]) {
+            epaper_draw_rect(x, base_y + (max_h - prev_heights[i]), bar_w, prev_heights[i], 0);
+            epaper_draw_rect(x, base_y + (max_h - h), bar_w, h, 1);
+        }
+        prev_heights[i] = h;
     }
     epaper_partial_refresh();
 }
