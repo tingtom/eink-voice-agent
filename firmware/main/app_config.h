@@ -6,10 +6,7 @@
 #define DEVICE_ID           "eink-agent-001"
 #define DEVICE_AUTH_TOKEN   "change-me-in-production"
 
-// ── WiFi ─────────────────────────────────────────────────────
-#define WIFI_SSID           "your-wifi-ssid"
-#define WIFI_PASSWORD       "your-wifi-password"
-#define WIFI_MAX_RETRIES    5
+// ── WiFi (credentials provisioned to NVS at runtime) ─────────
 
 // ── Hermes Server ────────────────────────────────────────────
 #define HERMES_HTTP_URL     "http://192.168.1.10:8123"

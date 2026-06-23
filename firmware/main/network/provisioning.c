@@ -6,6 +6,8 @@
 #include "esp_http_server.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
 #include "app_config.h"
 #include "wifi_manager.h"
 
@@ -17,6 +19,92 @@ static const char *TAG = "PROV";
 
 static httpd_handle_t server = NULL;
 static bool active = false;
+
+// ── DNS captive portal redirect ──────────────────────────────
+
+#define DNS_PORT 53
+
+static void dns_server_task(void *arg)
+{
+    (void)arg;
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Failed to create DNS socket");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(DNS_PORT),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "Failed to bind DNS socket (port may be busy)");
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "DNS server listening on port %d", DNS_PORT);
+
+    uint8_t buf[512];
+    struct sockaddr_in from;
+    socklen_t from_len = sizeof(from);
+
+    while (1) {
+        int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &from_len);
+        if (n < 12) continue;
+
+        uint16_t qdcount = (buf[4] << 8) | buf[5];
+        if (qdcount == 0) continue;
+
+        // Locate the query name (variable-length, terminated by 0x00)
+        int qpos = 12;
+        while (qpos < n && buf[qpos] != 0) {
+            qpos += 1 + buf[qpos];
+        }
+        if (qpos >= n) continue;
+        qpos += 1; // skip terminating zero
+
+        // Check query type is A record (0x0001)
+        if (qpos + 4 > n) continue;
+        uint16_t qtype = (buf[qpos] << 8) | buf[qpos + 1];
+        if (qtype != 1) continue; // only answer A-record queries
+
+        // Build response
+        buf[2] = 0x81; buf[3] = 0x80;           // flags: response, no error
+        buf[6] = 0; buf[7] = 1;                 // answer count = 1
+        buf[8] = 0; buf[9] = 0;                 // authority = 0
+        buf[10] = 0; buf[11] = 0;               // additional = 0
+
+        // Answer: pointer to name + A record (12 bytes)
+        int apos = qpos + 4; // after query type + class
+        buf[apos]     = 0xC0; buf[apos + 1] = 0x0C; // pointer to name
+        buf[apos + 2] = 0; buf[apos + 3] = 1;       // type A
+        buf[apos + 4] = 0; buf[apos + 5] = 1;       // class IN
+        buf[apos + 6] = 0; buf[apos + 7] = 0;       // TTL (high)
+        buf[apos + 8] = 0; buf[apos + 9] = 60;      // TTL (low) = 60s
+        buf[apos + 10] = 0; buf[apos + 11] = 4;     // data length = 4
+        // IP: 192.168.4.1
+        buf[apos + 12] = 192;
+        buf[apos + 13] = 168;
+        buf[apos + 14] = 4;
+        buf[apos + 15] = 1;
+
+        int total = apos + 16;
+        sendto(sock, buf, total, 0, (struct sockaddr *)&from, from_len);
+    }
+}
+
+static void start_dns_server(void)
+{
+    TaskHandle_t task;
+    xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &task);
+    if (task) {
+        ESP_LOGI(TAG, "DNS server task created");
+    }
+}
 
 static const char *HTML_PAGE =
     "<!DOCTYPE html>"
@@ -66,6 +154,15 @@ static const char *HTML_PAGE =
     "</body></html>";
 
 static esp_err_t root_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, HTML_PAGE, strlen(HTML_PAGE));
+    return ESP_OK;
+}
+
+// ── Catch-all HTTP handler for captive portal redirect ───────
+
+static esp_err_t catchall_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, HTML_PAGE, strlen(HTML_PAGE));
@@ -152,7 +249,8 @@ esp_err_t provisioning_start_ap(void)
 esp_err_t provisioning_start_server(void)
 {
     httpd_config_t httpd_cfg = HTTPD_DEFAULT_CONFIG();
-    httpd_cfg.max_uri_handlers = 5;
+    httpd_cfg.max_uri_handlers = 6;
+    httpd_cfg.stack_size = 6144;
 
     if (httpd_start(&server, &httpd_cfg) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start HTTP server");
@@ -160,10 +258,14 @@ esp_err_t provisioning_start_server(void)
     }
 
     httpd_uri_t root_uri = { .uri = "/", .method = HTTP_GET, .handler = root_get_handler };
+    httpd_uri_t catchall_uri = { .uri = "/*", .method = HTTP_GET, .handler = catchall_get_handler };
     httpd_uri_t config_uri = { .uri = "/config", .method = HTTP_POST, .handler = config_post_handler };
 
     httpd_register_uri_handler(server, &root_uri);
+    httpd_register_uri_handler(server, &catchall_uri);
     httpd_register_uri_handler(server, &config_uri);
+
+    start_dns_server();
 
     active = true;
     ESP_LOGI(TAG, "Server at http://192.168.4.1");

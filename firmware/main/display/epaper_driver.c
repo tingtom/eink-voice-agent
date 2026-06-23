@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include "esp_log.h"
 #include "epaper.h"
+#include "epaper_config.h"
 #include "app_config.h"
 #include "font_5x7.h"
 
@@ -52,7 +53,9 @@ void epaper_init(void)
 
 void epaper_clear(void)
 {
-    epd_fill(epd_handle, 1);
+    if (fb) {
+        memset(fb, 0xFF, DISPLAY_WIDTH * DISPLAY_HEIGHT / 8);
+    }
 }
 
 void epaper_full_refresh(void)
