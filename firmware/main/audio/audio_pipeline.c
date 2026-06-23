@@ -29,7 +29,7 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 
 // Playback test buffer — accumulates audio during recording for speaker loopback
-#define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE * 30)
+#define PLAYBACK_BUF_MAX_SAMPLES  (AUDIO_SAMPLE_RATE * 3)
 static int16_t *playback_buf = NULL;
 static size_t playback_len = 0;
 
@@ -60,11 +60,13 @@ static void audio_capture_task(void *arg)
                     if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                         ringbuffer_write(&audio_rb, buf, read);
                     }
-                    size_t room = PLAYBACK_BUF_MAX_SAMPLES - playback_len;
-                    size_t copy = read < room ? read : room;
-                    if (copy > 0) {
-                        memcpy(playback_buf + playback_len, buf, copy * sizeof(int16_t));
-                        playback_len += copy;
+                    if (playback_buf) {
+                        size_t room = PLAYBACK_BUF_MAX_SAMPLES - playback_len;
+                        size_t copy = read < room ? read : room;
+                        if (copy > 0) {
+                            memcpy(playback_buf + playback_len, buf, copy * sizeof(int16_t));
+                            playback_len += copy;
+                        }
                     }
                     const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
                     ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
@@ -197,11 +199,13 @@ static void wake_word_task(void *arg)
 
 static void audio_i2s_duplex_init(void)
 {
+    int dma_frames = AUDIO_BUFFER_SIZE;
+    if (dma_frames > 2046) dma_frames = 2046;
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
         .dma_desc_num = 8,
-        .dma_frame_num = AUDIO_BUFFER_SIZE,
+        .dma_frame_num = dma_frames,
         .auto_clear = true,
     };
 
@@ -259,7 +263,10 @@ void audio_pipeline_init(void)
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
 
     playback_buf = (int16_t *)calloc(PLAYBACK_BUF_MAX_SAMPLES, sizeof(int16_t));
-    assert(playback_buf);
+    if (!playback_buf) {
+        ESP_LOGE(TAG, "Failed to allocate playback buffer (%zu bytes)",
+                 PLAYBACK_BUF_MAX_SAMPLES * sizeof(int16_t));
+    }
     mic_start();
     ESP_LOGI(TAG, "Audio pipeline initialized (two-stage VAD + wake word)");
 }
@@ -293,7 +300,7 @@ void audio_pipeline_stop_recording(void)
     if (!recording) return;
     recording = false;
     vad_reset();
-    if (playback_len > 0) {
+    if (playback_buf && playback_len > 0) {
         int16_t *copy = malloc(playback_len * sizeof(int16_t));
         if (copy) {
             memcpy(copy, playback_buf, playback_len * sizeof(int16_t));
