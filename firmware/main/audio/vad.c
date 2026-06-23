@@ -8,8 +8,8 @@ static const char *TAG = "VAD";
 
 #define VAD_FRAME_MS      32
 #define VAD_FRAME_SAMPLES ((AUDIO_SAMPLE_RATE * VAD_FRAME_MS) / 1000)
-#define VAD_ENERGY_HIGH   5000
-#define VAD_ENERGY_LOW    2000
+#define VAD_ENERGY_HIGH   1000
+#define VAD_ENERGY_LOW    400
 #define VAD_HANGOVER      8
 
 static int hangover_count = 0;

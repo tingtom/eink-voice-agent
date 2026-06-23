@@ -134,7 +134,7 @@ static bool setup_tflite(void)
     }
 
     tflite_arena = (uint8_t *)heap_caps_malloc(
-        TFLITE_MODEL_ARENA_SIZE, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+        TFLITE_MODEL_ARENA_SIZE, MALLOC_CAP_DEFAULT);
     if (!tflite_arena) {
         ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)",
                  TFLITE_MODEL_ARENA_SIZE);
