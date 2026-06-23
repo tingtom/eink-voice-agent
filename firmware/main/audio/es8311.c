@@ -59,13 +59,15 @@ static const reg_cfg init_seq[] = {
     {0x2C, 0xFF},   // Additional power blocks
     {0x2D, 0x30},   // Bias current setup
 
-    // Clock for 16kHz I2S slave (MCLK/LRCK = 256) — V2 registers
-    {0x01, 0x30},   // CLK_MANAGER_REG01: clk src + enable
-    {0x02, 0x00},   // CLK_MANAGER_REG02: dividers
-    {0x03, 0x10},   // CLK_MANAGER_REG03: ADC fs_mode + OSR
-    {0x04, 0x10},   // CLK_MANAGER_REG04: DAC OSR
-    {0x05, 0x00},   // CLK_MANAGER_REG05: ADC/DAC clock div
-    {0x06, 0x00},   // CLK_MANAGER_REG06: BCLK divider
+    // Clock for 16kHz I2S slave (MCLK=4.096MHz, LRCK=256) — V2 registers per Espressif driver
+    {0x01, 0x30},   // CLK_MANAGER_REG01: MCLK src, clk enable
+    {0x02, 0x00},   // CLK_MANAGER_REG02: pre_div=1, pre_multi=1
+    {0x03, 0x10},   // CLK_MANAGER_REG03: ADC fs_mode=0, OSR=16
+    {0x04, 0x20},   // CLK_MANAGER_REG04: DAC OSR=32
+    {0x05, 0x00},   // CLK_MANAGER_REG05: ADC/DAC div=1
+    {0x06, 0x03},   // CLK_MANAGER_REG06: BCLK divider=4 (bclk_div-1)
+    {0x07, 0x00},   // CLK_MANAGER_REG07: LRCK high div
+    {0x08, 0xFF},   // CLK_MANAGER_REG08: LRCK low div=255
 
     // ADC input path — single-ended MIC1, +18dB PGA (V1 register)
     {0x04, 0x06},   // INPUT_SEL=00(MIC1), PGA_GAIN=11(+18dB)
