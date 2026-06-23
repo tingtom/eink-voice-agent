@@ -18,10 +18,10 @@ static const char *TAG = "WAKE_WORD";
 #define INPUT_QUANT_SCALE  0.00390625f
 #define INPUT_QUANT_ZP     (-128)
 
-static int16_t audio_buf[MFE_INPUT_SAMPLES];
+static int16_t *audio_buf = NULL;
 static size_t audio_count = 0;
 
-static uint8_t tflite_arena[TFLITE_MODEL_ARENA_SIZE];
+static uint8_t *tflite_arena = NULL;
 static const tflite::Model *tflite_model = NULL;
 static tflite::MicroMutableOpResolver<7> resolver;
 static tflite::MicroInterpreter *interpreter = NULL;
@@ -167,8 +167,27 @@ extern "C" void wake_word_init(void)
     ESP_LOGI(TAG, "Initializing wake word model: '%s' (sensitivity=%.1f)",
              WAKE_WORD, sensitivity);
 
+    audio_buf = (int16_t *)heap_caps_malloc(MFE_INPUT_SAMPLES * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!audio_buf) {
+        ESP_LOGE(TAG, "Failed to allocate audio buffer (%d bytes)",
+                 MFE_INPUT_SAMPLES * (int)sizeof(int16_t));
+        return;
+    }
+
+    tflite_arena = (uint8_t *)heap_caps_malloc(TFLITE_MODEL_ARENA_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!tflite_arena) {
+        ESP_LOGE(TAG, "Failed to allocate TFLite arena (%d bytes)", TFLITE_MODEL_ARENA_SIZE);
+        heap_caps_free(audio_buf);
+        audio_buf = NULL;
+        return;
+    }
+
     if (!setup_tflite()) {
         ESP_LOGE(TAG, "TFLite setup failed");
+        heap_caps_free(tflite_arena);
+        tflite_arena = NULL;
+        heap_caps_free(audio_buf);
+        audio_buf = NULL;
         return;
     }
 
@@ -178,7 +197,7 @@ extern "C" void wake_word_init(void)
 
 extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
 {
-    if (!initialized) return false;
+    if (!initialized || !audio_buf) return false;
 
     size_t to_copy = samples;
     if (audio_count + to_copy > MFE_INPUT_SAMPLES) {
