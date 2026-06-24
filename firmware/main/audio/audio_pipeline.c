@@ -29,8 +29,8 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 static bool wake_word_checking = false;
 
-static int16_t send_buf[VAD_BURST_SAMPLES * 4];
-static size_t send_len = 0;
+int16_t send_buf[VAD_BURST_SAMPLES * 4];
+size_t send_len = 0;
 
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
