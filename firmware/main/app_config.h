@@ -66,7 +66,7 @@
 
 // ── Wake Word ────────────────────────────────────────────────
 #define WAKE_WORD           "hi jeff"
-#define WAKE_WORD_SENSITIVITY       0.5f
+#define WAKE_WORD_SENSITIVITY       0.3f
 #define WAKE_WORD_MODEL_PATH   "/models/tflite_learn_1037720_5.h"
 
 // ── Battery ──────────────────────────────────────────────────

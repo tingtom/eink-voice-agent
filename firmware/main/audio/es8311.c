@@ -60,7 +60,7 @@ esp_err_t es8311_init(void)
         return ESP_FAIL;
     }
 
-    ret = codec_if->set_mic_gain(codec_if, 30.0);
+    ret = codec_if->set_mic_gain(codec_if, 40.0);
     if (ret != 0) {
         ESP_LOGE(TAG, "set_mic_gain failed: %d", ret);
         return ESP_FAIL;
