@@ -133,7 +133,8 @@ void ui_update_recording_viz(int32_t energy)
 
     for (int i = 0; i < bar_count; i++) {
         float t = (float)(i + 1) / bar_count;
-        int h = (int)((energy * max_h * t) / 30000);
+        // Scale: energy ~100-2000, want h up to 40
+        int h = (int)((energy * max_h * t) / 2000);
         if (h < 2) h = 2;
         if (h > max_h) h = max_h;
 
