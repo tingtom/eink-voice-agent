@@ -29,6 +29,9 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 static bool wake_word_checking = false;
 
+static int16_t send_buf[VAD_BURST_SAMPLES * 4];
+static size_t send_len = 0;
+
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
 #define AUDIO_EVENT_WAKE_WORD      BIT1
@@ -56,9 +59,15 @@ static void audio_capture_task(void *arg)
                     if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                         ringbuffer_write(&audio_rb, buf, read);
                     }
-                    const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
-                    ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
-                                              mode_str[current_mode]);
+                    // Accumulate 4 chunks (200ms) before sending
+                    memcpy(send_buf + send_len, buf, read * sizeof(int16_t));
+                    send_len += read;
+                    if (send_len >= VAD_BURST_SAMPLES * 4) {
+                        const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
+                        ws_client_send_audio_mode((uint8_t *)send_buf, send_len * sizeof(int16_t),
+                                                  mode_str[current_mode]);
+                        send_len = 0;
+                    }
                 }
 
                 int64_t now = esp_timer_get_time();
@@ -269,6 +278,12 @@ void audio_pipeline_stop_recording(void)
     if (!recording) return;
     recording = false;
     vad_reset();
+    if (send_len > 0) {
+        const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
+        ws_client_send_audio_mode((uint8_t *)send_buf, send_len * sizeof(int16_t),
+                                  mode_str[current_mode]);
+        send_len = 0;
+    }
     ESP_LOGI(TAG, "Recording stopped");
 }
 
