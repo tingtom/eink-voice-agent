@@ -118,6 +118,18 @@ void ui_show_recording_screen(void)
 }
 
 static int prev_heights[12] = {0};
+static int recording_frame = 0;
+
+void ui_show_recording_screen(void)
+{
+    epaper_clear();
+    int tw = epaper_text_width("Listening...", 12);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Listening...", 12);
+    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=cancel", 8);
+    draw_status_bar();
+    epaper_partial_refresh();
+    recording_frame = 0;
+}
 
 void ui_update_recording_viz(int32_t energy)
 {
@@ -144,6 +156,15 @@ void ui_update_recording_viz(int32_t energy)
         }
         prev_heights[i] = h;
     }
+
+    // Pulsing indicator in center
+    int cx = DISPLAY_WIDTH / 2;
+    int cy = 55 + 15;
+    int sizes[] = {4, 6, 8, 10, 8, 6};
+    int s = sizes[recording_frame % 6];
+    epaper_draw_rect(cx - s, cy - s, s * 2, s * 2, 1);
+    recording_frame++;
+
     epaper_partial_refresh();
 }
 
