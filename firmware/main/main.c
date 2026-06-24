@@ -632,9 +632,9 @@ void app_main(void)
         ESP_ERROR_CHECK(mdns_hostname_set(DEVICE_NAME));
         ESP_ERROR_CHECK(mdns_instance_name_set("EInk Voice Agent"));
         mdns_service_add("eink-voice-http", "_http", "_tcp", 80, NULL, 0);
-        mdns_service_add("eink-voice-agent", "_eink-voice-agent", "_tcp", 0, NULL, 0);
-        mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "device_type", "eink_voice_agent");
-        mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "version", "1.0");
+        mdns_service_add("eink-voice-agent", "_eink-voice-gateway", "_tcp", 8123, NULL, 0);
+        mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "device_type", "eink_voice_agent");
+        mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "version", "1.0");
         ESP_LOGI(TAG, "mDNS started — device available as %s.local", DEVICE_NAME);
     } else {
         ESP_LOGW(TAG, "WiFi connection failed, starting provisioning");
@@ -667,9 +667,20 @@ void app_main(void)
     ESP_LOGI(TAG, "Initialization complete, entering main loop");
 
     int telemetry_ticks = 0;
+    static int64_t last_ws_reconnect_ticks = 0;
 
     while (1) {
         ws_client_reconnect();
+
+        if (ws_client_needs_reset()) {
+            int64_t now = esp_timer_get_time() / 1000;
+            if (now - last_ws_reconnect_ticks > 5000) {
+                ESP_LOGW(TAG, "WebSocket stale connection detected, resetting client");
+                ws_client_destroy();
+                ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
+                last_ws_reconnect_ticks = now;
+            }
+        }
         uint8_t battery = power_get_battery_pct();
         ui_update_battery(battery);
         ui_update_wifi_status(wifi_is_connected());
@@ -736,11 +747,11 @@ void app_main(void)
             // Update mDNS TXT records with live values
             char buf[16];
             snprintf(buf, sizeof(buf), "%u", bat);
-            mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "battery", buf);
+            mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "battery", buf);
             snprintf(buf, sizeof(buf), "%s", chg ? "true" : "false");
-            mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "charging", buf);
+            mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "charging", buf);
             snprintf(buf, sizeof(buf), "%d", rssi);
-            mdns_service_txt_item_set("_eink-voice-agent", "_tcp", "wifi_rssi", buf);
+            mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "wifi_rssi", buf);
         }
 
         // Skip sleep timer when docked (on USB power)

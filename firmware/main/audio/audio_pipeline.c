@@ -18,6 +18,7 @@
 #include "recordings.h"
 #include "ui_manager.h"
 #include "es8311.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 
@@ -35,6 +36,7 @@ static audio_ui_cb_t recording_ended_cb = NULL;
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
 #define AUDIO_EVENT_WAKE_WORD      BIT1
+#define AUDIO_EVENT_WS_CONNECTED   BIT2
 
 #define VAD_BURST_MS        50
 #define VAD_BURST_SAMPLES   ((AUDIO_SAMPLE_RATE * VAD_BURST_MS) / 1000)
@@ -42,19 +44,25 @@ static EventGroupHandle_t audio_events;
 
 #define UI_UPDATE_INTERVAL_US  (300 * 1000)
 
-int16_t send_buf[VAD_BURST_SAMPLES * 4];
-size_t send_len = 0;
+static uint32_t send_packets = 0;
 
 static void audio_capture_task(void *arg)
 {
     (void)arg;
     int16_t buf[VAD_BURST_SAMPLES];
     int64_t last_ui = 0;
+    uint32_t iter = 0;
 
     while (1) {
         if (recording) {
             size_t read = 0;
             esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
+            iter++;
+            if (iter % 100 == 0) {
+                ESP_LOGI(TAG, "capture iter=%lu heap=%u",
+                         (unsigned long)iter,
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            }
             if (ret == ESP_OK && read > 0) {
                 if (offline_recording) {
                     recording_write_audio(buf, read);
@@ -62,14 +70,27 @@ static void audio_capture_task(void *arg)
                     if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                         ringbuffer_write(&audio_rb, buf, read);
                     }
-                    // Accumulate 20 chunks (1s) before sending to reduce WS load
-                    memcpy(send_buf + send_len, buf, read * sizeof(int16_t));
-                    send_len += read;
-                    if (send_len >= VAD_BURST_SAMPLES * 20) {
-                        const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
-                        ws_client_send_audio_mode((uint8_t *)send_buf, send_len * sizeof(int16_t),
-                                                  mode_str[current_mode]);
-                        send_len = 0;
+                    if (ws_client_needs_reset()) {
+                        // Skip WS send; main loop is recreating the client after
+                        // a stale transport. This prevents the ~4.7 KB heap leak
+                        // per failed send_text() inside the esp-websocket lib.
+                    } else {
+                        bool connected = ws_client_is_connected();
+                        uint32_t free_before = (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                        esp_err_t sret = ws_client_send_audio_mode(
+                            (uint8_t *)buf, read * sizeof(int16_t),
+                            current_mode == MODE_AGENT ? "agent" :
+                            current_mode == MODE_NOTE ? "note" :
+                            current_mode == MODE_TRANSCRIBE ? "transcribe" : "todo");
+                        uint32_t free_after = (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                        if (sret != ESP_OK) {
+                            UBaseType_t pri = uxTaskPriorityGet(NULL);
+                            ESP_LOGE(TAG, "send failed: ret=%s len=%u connected=%d heap_before=%u heap_after=%u task_pri=%u",
+                                     esp_err_to_name(sret), (unsigned)(read * sizeof(int16_t)),
+                                     connected, free_before, free_after, (unsigned)pri);
+                        } else {
+                            send_packets++;
+                        }
                     }
                 }
 
@@ -81,7 +102,14 @@ static void audio_capture_task(void *arg)
                     energy /= (int32_t)read;
                     ui_update_recording_viz(energy);
                 }
+            } else if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "mic_read failed: %s", esp_err_to_name(ret));
+            } else {
+                ESP_LOGW(TAG, "mic_read returned 0 (iter=%lu)", (unsigned long)iter);
             }
+        } else {
+            iter = 0;
+            send_packets = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -274,7 +302,8 @@ void audio_pipeline_start_recording(audio_mode_t mode)
     recording = true;
     processing = false;
     power_mark_activity();
-    ESP_LOGI(TAG, "Recording started (mode=%d)", mode);
+    const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
+    ESP_LOGI(TAG, "Recording started (mode=%s)", mode_str[mode]);
 }
 
 void audio_pipeline_stop_recording(void)
@@ -282,14 +311,8 @@ void audio_pipeline_stop_recording(void)
     if (!recording) return;
     recording = false;
     vad_reset();
-    if (send_len > 0) {
-        const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
-        ws_client_send_audio_mode((uint8_t *)send_buf, send_len * sizeof(int16_t),
-                                  mode_str[current_mode]);
-        send_len = 0;
-    }
     if (recording_ended_cb) recording_ended_cb();
-    ESP_LOGI(TAG, "Recording stopped");
+    ESP_LOGI(TAG, "Recording stopped (total_send_packets=%lu)", (unsigned long)send_packets);
 }
 
 void audio_pipeline_start_processing(void)

@@ -189,7 +189,11 @@ extern "C" void wake_word_init(void)
 
 extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
 {
-    if (!initialized || !audio_buf) return false;
+    if (!initialized) {
+        ESP_LOGE(TAG, "wake_word_detect called but not initialized");
+        return false;
+    }
+    if (!audio_buf) return false;
 
     size_t to_copy = samples;
     if (audio_count + to_copy > MFE_INPUT_SAMPLES) {
@@ -202,6 +206,7 @@ extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
         return false;
     }
 
+    ESP_LOGD(TAG, "MFE buffer full (%d samples), running inference", MFE_INPUT_SAMPLES);
     int8_t *input_data = input_tensor->data.int8;
     extract_mfe(audio_buf, input_data);
 

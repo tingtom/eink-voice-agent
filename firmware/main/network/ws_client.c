@@ -5,6 +5,7 @@
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "mdns.h"
 #include "lwip/inet.h"
 #include "app_config.h"
@@ -18,6 +19,23 @@ static ws_message_callback_t message_cb = NULL;
 static char auth_token[128] = {0};
 
 static char discovered_url[256] = {0};
+static bool needs_reset = false;
+static TimerHandle_t auth_timer = NULL;
+
+static void auth_timer_callback(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+    if (!client || !esp_websocket_client_is_connected(client)) return;
+    char auth[256];
+    snprintf(auth, sizeof(auth),
+             "{\"type\":\"auth\",\"device_id\":\"%s\",\"token\":\"%s\"}",
+             DEVICE_ID, auth_token);
+    esp_err_t ret = esp_websocket_client_send_text(client, auth, strlen(auth), portMAX_DELAY);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "deferred auth send failed: %s", esp_err_to_name(ret));
+        needs_reset = true;
+    }
+}
 
 static esp_err_t discover_gateway(void)
 {
@@ -59,12 +77,9 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "WebSocket connected");
-            {
-                char auth[256];
-                snprintf(auth, sizeof(auth),
-                         "{\"type\":\"auth\",\"device_id\":\"%s\",\"token\":\"%s\"}",
-                         DEVICE_ID, auth_token);
-                esp_websocket_client_send_text(client, auth, strlen(auth), portMAX_DELAY);
+            needs_reset = false;
+            if (auth_timer) {
+                xTimerStart(auth_timer, 0);
             }
             break;
 
@@ -123,6 +138,10 @@ esp_err_t ws_client_init(const char *url, const char *token)
         return ESP_FAIL;
     }
 
+    if (!auth_timer) {
+        auth_timer = xTimerCreate("auth_timer", pdMS_TO_TICKS(500), pdFALSE, NULL, auth_timer_callback);
+    }
+
     ESP_ERROR_CHECK(esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, ws_event_handler, NULL));
     ESP_ERROR_CHECK(esp_websocket_client_start(client));
 
@@ -141,32 +160,43 @@ esp_err_t ws_client_send_json(const char *json_str)
     return esp_websocket_client_send_text(client, json_str, strlen(json_str), portMAX_DELAY);
 }
 
-esp_err_t ws_client_send_audio_mode(const uint8_t *data, size_t len, const char *mode)
+esp_err_t ws_client_send_text(const char *text)
 {
-    if (!client || !esp_websocket_client_is_connected(client)) return ESP_FAIL;
-
-    size_t b64_len = ((len + 2) / 3) * 4 + 256;
-    char *payload = malloc(b64_len);
-    if (!payload) return ESP_ERR_NO_MEM;
-
-    size_t encoded = base64_encode(data, len, payload + 128, b64_len - 128);
-    size_t hdr_len = snprintf(payload, 128,
-                              "{\"type\":\"audio\",\"mode\":\"%s\",\"session_id\":\"\",\"data\":\"",
-                              mode ? mode : "");
-    payload[hdr_len + encoded] = '"';
-    payload[hdr_len + encoded + 1] = '}';
-    payload[hdr_len + encoded + 2] = '\0';
-
-    size_t total = hdr_len + encoded + 2;
-    esp_err_t ret = esp_websocket_client_send_text(client, payload, total, portMAX_DELAY);
-    free(payload);
+    if (!client || !esp_websocket_client_is_connected(client)) {
+        needs_reset = true;
+        return ESP_FAIL;
+    }
+    esp_err_t ret = esp_websocket_client_send_text(client, text, strlen(text), portMAX_DELAY);
+    if (ret != ESP_OK) needs_reset = true;
     return ret;
 }
 
-esp_err_t ws_client_send_text(const char *text)
+esp_err_t ws_client_send_audio_mode(const uint8_t *data, size_t len, const char *mode)
 {
-    if (!client || !esp_websocket_client_is_connected(client)) return ESP_FAIL;
-    return esp_websocket_client_send_text(client, text, strlen(text), portMAX_DELAY);
+    if (!client || !esp_websocket_client_is_connected(client)) {
+        needs_reset = true;
+        return ESP_FAIL;
+    }
+
+    static char payload[2300]; // fits full 1600-byte audio packet via base64+header
+    const size_t payload_cap = sizeof(payload);
+
+    int hdr_len = snprintf(payload, payload_cap > 128 ? 128 : payload_cap,
+                           "{\"type\":\"audio\",\"mode\":\"%s\",\"session_id\":\"\",\"data\":\"",
+                           mode ? mode : "");
+    if (hdr_len < 0 || (size_t)hdr_len >= payload_cap - 1) return ESP_ERR_INVALID_ARG;
+
+    size_t remaining = payload_cap - (size_t)hdr_len - 2;
+    size_t encoded = base64_encode(data, len, payload + hdr_len, remaining);
+    if (encoded == 0 || encoded >= remaining) return ESP_ERR_INVALID_ARG;
+
+    size_t total = hdr_len + encoded + 2;
+    payload[total - 2] = '"';
+    payload[total - 1] = '}';
+
+    esp_err_t ret = esp_websocket_client_send_text(client, payload, total, portMAX_DELAY);
+    if (ret != ESP_OK) needs_reset = true;
+    return ret;
 }
 
 void ws_client_set_callback(ws_message_callback_t cb)
@@ -179,12 +209,28 @@ bool ws_client_is_connected(void)
     return client && esp_websocket_client_is_connected(client);
 }
 
+bool ws_client_needs_reset(void)
+{
+    return needs_reset;
+}
+
+void ws_client_destroy(void)
+{
+    if (auth_timer) {
+        xTimerStop(auth_timer, 0);
+    }
+    if (client) {
+        esp_websocket_client_stop(client);
+        esp_websocket_client_destroy(client);
+        client = NULL;
+        ESP_LOGI(TAG, "WebSocket client destroyed");
+    }
+}
+
 void ws_client_reconnect(void)
 {
     if (!client) return;
     if (esp_websocket_client_is_connected(client)) return;
 
-    // Library auto-reconnect handles retries with 5s interval;
-    // just log and let it do its job.
     ESP_LOGW(TAG, "WebSocket disconnected, waiting for auto-reconnect");
 }
