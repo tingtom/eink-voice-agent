@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict
 from pathlib import Path
+from aiohttp import web
 
 from gateway.platforms.base import (
     BasePlatformAdapter,
@@ -95,19 +96,13 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         super().__init__(config, Platform("eink_voice_agent"))
         self._port = int(os.getenv("EINK_DEVICE_PORT", "8123"))
         self._host = os.getenv("EINK_DEVICE_HOST", "0.0.0.0")
-        self._server = None
-        self._connections: dict[str, object] = {}
+        self._http_server = None
         self._audio_buffers: dict[str, list[str]] = {}
         self._ws_by_chat: dict[str, object] = {}
+        self._device_chat_map: dict[str, str] = {}
         _ensure_dirs()
 
     async def connect(self) -> bool:
-        try:
-            import websockets
-        except ImportError:
-            logger.error("pip install websockets")
-            return False
-
         # Advertise via mDNS so ESP32 can discover us
         self._zeroconf = None
         try:
@@ -129,10 +124,19 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         except Exception as e:
             logger.warning("mDNS registration failed: %s", e)
 
-        self._server = await websockets.serve(
-            self._handle_ws, self._host, self._port,
-        )
-        logger.info("E-Ink device server on ws://%s:%s", self._host, self._port)
+        app = web.Application()
+        app.add_routes([
+            web.post("/api/device/auth", self._handle_auth),
+            web.post("/api/device/audio", self._handle_audio),
+            web.post("/api/device/audio/end", self._handle_audio_end),
+            web.post("/api/device/telemetry", self._handle_telemetry),
+        ])
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, self._host, self._port)
+        await site.start()
+        self._http_server = runner
+        logger.info("E-Ink device HTTP server on http://%s:%s", self._host, self._port)
         self._mark_connected()
         return True
 
@@ -143,154 +147,129 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                 self._zeroconf.close()
             except Exception:
                 pass
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
+        if self._http_server:
+            await self._http_server.cleanup()
         self._mark_disconnected()
 
-    async def _handle_ws(self, ws):
-        device_id = None
-        chat_id = None
+    async def _handle_auth(self, request):
         try:
-            import websockets
-
-            async for raw in ws:
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    await ws.send(json.dumps({"type": "error", "data": "invalid json"}))
-                    continue
-
-                msg_type = msg.get("type", "")
-
-                if msg_type == "auth":
-                    device_id = msg.get("device_id", "unknown")
-                    chat_id = f"eink:{device_id}"
-                    self._ws_by_chat[chat_id] = ws
-                    logger.info("Device '%s' authenticated", device_id)
-                    await ws.send(json.dumps({"type": "auth_ok"}))
-                    _log_activity({"type": "connect", "detail": f"Device '{device_id}' connected"})
-
-                elif msg_type == "audio":
-                    if not chat_id:
-                        await ws.send(json.dumps({"type": "error", "data": "not authd"}))
-                        continue
-                    session = msg.get("session_id", chat_id)
-                    if session not in self._audio_buffers:
-                        self._audio_buffers[session] = []
-                    self._audio_buffers[session].append(msg.get("data", ""))
-                    mode = msg.get("mode", "agent")
-
-                elif msg_type == "end":
-                    if not chat_id:
-                        continue
-                    session = msg.get("session_id", chat_id)
-                    mode = msg.get("mode", "agent")
-                    chunks = self._audio_buffers.pop(session, [])
-                    full_audio = "".join(chunks)
-                    asyncio.create_task(
-                        self._process_end(session, mode, full_audio, chat_id, device_id)
-                    )
-
-                elif msg_type in ("text",):
-                    if not chat_id:
-                        continue
-                    session = msg.get("session_id", chat_id)
-                    content = msg.get("data", "")
-                    _log_activity({"type": "message", "direction": "in",
-                                   "content": content[:500], "session_id": session})
-                    source = self.build_source(
-                        chat_id=chat_id, chat_name=f"Device-{device_id}",
-                        chat_type="dm", user_id=device_id, user_name=device_id,
-                    )
-                    event = MessageEvent(
-                        text=content,
-                        message_type=MessageType.TEXT,
-                        source=source,
-                        message_id=session,
-                    )
-                    await self.handle_message(event)
-
-                elif msg_type == "ping":
-                    await ws.send(json.dumps({"type": "pong"}))
-
-                elif msg_type == "telemetry":
-                    if not chat_id:
-                        continue
-                    telemetry = {k: v for k, v in msg.items() if k not in ("type",)}
-                    _save_telemetry(telemetry)
-                    _log_activity({
-                        "type": "telemetry",
-                        "detail": "battery={}% wifi={}dBm".format(
-                            telemetry.get("battery", "?"), telemetry.get("wifi_rssi", "?")
-                        ),
-                    })
-
+            body = await request.json()
         except Exception:
-            logger.info("Device '%s' disconnected", device_id or "unknown")
-        finally:
-            if chat_id:
-                self._ws_by_chat.pop(chat_id, None)
-                _log_activity({"type": "disconnect", "detail": f"Device '{device_id}' disconnected"})
+            return web.json_response({"error": "invalid json"}, status=400)
+
+        device_id = body.get("device_id", "unknown")
+        chat_id = f"eink:{device_id}"
+        self._device_chat_map[device_id] = chat_id
+        logger.info("Device '%s' authenticated via HTTP", device_id)
+        _log_activity({"type": "connect", "detail": f"Device '{device_id}' connected"})
+        return web.json_response({"type": "auth_ok", "device_id": device_id})
+
+    async def _handle_audio(self, request):
+        device_id = request.headers.get("X-Device-ID", "unknown")
+        chat_id = self._device_chat_map.get(device_id)
+        if not chat_id:
+            return web.json_response({"error": "not authenticated"}, status=401)
+
+        session = request.query.get("session_id", chat_id)
+        mode = request.query.get("mode", "agent")
+        body = await request.read()
+
+        import base64
+        chunk_b64 = base64.b64encode(body).decode("ascii")
+        if session not in self._audio_buffers:
+            self._audio_buffers[session] = []
+        self._audio_buffers[session].append(chunk_b64)
+        return web.json_response({"status": "ok"})
+
+    async def _handle_audio_end(self, request):
+        device_id = request.headers.get("X-Device-ID", "unknown")
+        chat_id = self._device_chat_map.get(device_id)
+        if not chat_id:
+            return web.json_response({"error": "not authenticated"}, status=401)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+
+        session = body.get("session_id", chat_id)
+        mode = body.get("mode", "agent")
+        chunks = self._audio_buffers.pop(session, [])
+        full_audio = "".join(chunks)
+
+        try:
+            reply = await self._process_end(session, mode, full_audio, chat_id, device_id)
+            return web.json_response({"type": "response", "data": reply})
+        except Exception as e:
+            logger.error("Audio processing error: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_telemetry(self, request):
+        try:
+            body = await request.json()
+            telemetry = {k: v for k, v in body.items() if k not in ("type",)}
+            _save_telemetry(telemetry)
+            _log_activity({
+                "type": "telemetry",
+                "detail": "battery={}% wifi={}dBm".format(
+                    telemetry.get("battery", "?"), telemetry.get("wifi_rssi", "?")
+                ),
+            })
+            return web.json_response({"status": "ok"})
+        except Exception as e:
+            logger.error("Telemetry error: %s", e)
+            return web.json_response({"error": str(e)}, status=400)
 
     async def _process_end(self, session, mode, full_audio, chat_id, device_id):
-        try:
-            if mode == "transcribe":
+        if mode == "transcribe":
+            text = _transcribe_audio(full_audio)
+            timestamp = __import__("datetime").datetime.now().strftime(
+                "%Y-%m-%d_%H-%M-%S"
+            )
+            note_file = NOTES_DIR / f"note_{timestamp}.txt"
+            note_file.write_text(text)
+            _log_activity({"type": "message", "direction": "in",
+                           "content": f"[voice note] {text[:500]}".strip(),
+                           "session_id": session})
+            return f"Transcribed note saved:\n\n{text[:180]}"
+
+        elif mode == "todo":
+            if full_audio:
                 text = _transcribe_audio(full_audio)
-                timestamp = __import__("datetime").datetime.now().strftime(
-                    "%Y-%m-%d_%H-%M-%S"
-                )
-                note_file = NOTES_DIR / f"note_{timestamp}.txt"
-                note_file.write_text(text)
-                _log_activity({"type": "message", "direction": "in",
-                               "content": f"[voice note] {text[:500]}".strip(),
-                               "session_id": session})
-                reply = f"Transcribed note saved:\n\n{text[:180]}"
-                await self.send(chat_id, reply)
-
-            elif mode == "todo":
-                if full_audio:
-                    text = _transcribe_audio(full_audio)
-                else:
-                    text = "list my todos"
-                source = self.build_source(
-                    chat_id=chat_id, chat_name=f"Device-{device_id}",
-                    chat_type="dm", user_id=device_id, user_name=device_id,
-                )
-                event = MessageEvent(
-                    text=text,
-                    message_type=MessageType.TEXT,
-                    source=source,
-                    message_id=session,
-                )
-                await self.handle_message(event)
-
             else:
-                source = self.build_source(
-                    chat_id=chat_id, chat_name=f"Device-{device_id}",
-                    chat_type="dm", user_id=device_id, user_name=device_id,
-                )
-                event = MessageEvent(
-                    text="[audio input]",
-                    message_type=MessageType.TEXT,
-                    source=source,
-                    message_id=session,
-                    extra_data={"audio_data": full_audio},
-                )
-                await self.handle_message(event)
-        except Exception as e:
-            logger.error("Background processing error: %s", e)
+                text = "list my todos"
+            source = self.build_source(
+                chat_id=chat_id, chat_name=f"Device-{device_id}",
+                chat_type="dm", user_id=device_id, user_name=device_id,
+            )
+            event = MessageEvent(
+                text=text,
+                message_type=MessageType.TEXT,
+                source=source,
+                message_id=session,
+            )
+            await self.handle_message(event)
+            # Return a simple acknowledgment
+            return "Todo command processed"
+
+        else:
+            source = self.build_source(
+                chat_id=chat_id, chat_name=f"Device-{device_id}",
+                chat_type="dm", user_id=device_id, user_name=device_id,
+            )
+            event = MessageEvent(
+                text="[agent audio input]",
+                message_type=MessageType.TEXT,
+                source=source,
+                message_id=session,
+                extra_data={"audio_data": full_audio},
+            )
+            await self.handle_message(event)
+            return "Audio received"
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
-        ws = self._ws_by_chat.get(chat_id)
-        if not ws:
-            return SendResult(success=False, message_id="")
-        try:
-            await ws.send(json.dumps({"type": "response", "data": content}))
-            _log_activity({"type": "message", "direction": "out",
-                           "content": content[:500], "session_id": chat_id})
-        except Exception:
-            return SendResult(success=False, message_id="")
+        # For HTTP mode, we don't push to device.
+        # Device polls for messages or we return response inline.
         return SendResult(success=True, message_id="")
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
@@ -339,6 +318,7 @@ def todo_delete(args, **kwargs) -> str:
 def check_requirements() -> bool:
     try:
         import websockets
+        import aiohttp
         return True
     except ImportError:
         return False
@@ -351,7 +331,7 @@ def register(ctx):
         adapter_factory=lambda cfg: EInkDeviceAdapter(cfg),
         check_fn=check_requirements,
         required_env=[],
-        install_hint="pip install websockets",
+        install_hint="pip install websockets aiohttp",
         platform_hint=(
             "You are talking to a user through an E-Ink Voice Agent device. "
             "Keep responses concise (2-3 sentences). For todo commands, use "
