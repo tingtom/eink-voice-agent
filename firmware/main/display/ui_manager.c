@@ -53,7 +53,7 @@ static void draw_status_bar(void)
     int x = 2;
     draw_wifi_icon(x, 2, wifi_ok);
     x += 22;
-    draw_hermes_icon(x, 2, hermes_ok);
+    draw_hermes_icon(x, 8, hermes_ok);
     x += 12;
     epaper_draw_text(x, 1, status_text, 8);
     draw_battery_icon(DISPLAY_WIDTH - 52, 2, battery);
@@ -110,8 +110,8 @@ void ui_show_menu(const char **items, int count, int selected)
 void ui_show_recording_screen(void)
 {
     epaper_clear();
-    int tw = epaper_text_width("Listening...", 16);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Listening...", 16);
+    int tw = epaper_text_width("Listening...", 12);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Listening...", 12);
     epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=cancel", 8);
     draw_status_bar();
     epaper_partial_refresh();

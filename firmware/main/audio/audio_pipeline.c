@@ -59,10 +59,10 @@ static void audio_capture_task(void *arg)
                     if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
                         ringbuffer_write(&audio_rb, buf, read);
                     }
-                    // Accumulate 4 chunks (200ms) before sending
+                    // Accumulate 20 chunks (1s) before sending to reduce WS load
                     memcpy(send_buf + send_len, buf, read * sizeof(int16_t));
                     send_len += read;
-                    if (send_len >= VAD_BURST_SAMPLES * 4) {
+                    if (send_len >= VAD_BURST_SAMPLES * 20) {
                         const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
                         ws_client_send_audio_mode((uint8_t *)send_buf, send_len * sizeof(int16_t),
                                                   mode_str[current_mode]);
