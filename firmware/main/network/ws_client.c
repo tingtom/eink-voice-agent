@@ -69,7 +69,9 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
             break;
 
         case WEBSOCKET_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "WebSocket disconnected");
+            ESP_LOGW(TAG, "WebSocket disconnected, reconnecting...");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_websocket_client_start(client);
             break;
 
         case WEBSOCKET_EVENT_DATA:
