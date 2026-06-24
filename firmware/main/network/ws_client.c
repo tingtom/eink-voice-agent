@@ -72,6 +72,21 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
             ESP_LOGW(TAG, "WebSocket disconnected");
             break;
 
+        case WEBSOCKET_EVENT_RECONNECTING:
+            ESP_LOGI(TAG, "WebSocket reconnecting...");
+            break;
+
+        case WEBSOCKET_EVENT_RECONNECTED:
+            ESP_LOGI(TAG, "WebSocket reconnected, re-authenticating");
+            {
+                char auth[256];
+                snprintf(auth, sizeof(auth),
+                         "{\"type\":\"auth\",\"device_id\":\"%s\",\"token\":\"%s\"}",
+                         DEVICE_ID, auth_token);
+                esp_websocket_client_send_text(client, auth, strlen(auth), portMAX_DELAY);
+            }
+            break;
+
         case WEBSOCKET_EVENT_DATA:
             if (message_cb && event->data_len > 0) {
                 char *buf = malloc(event->data_len + 1);
