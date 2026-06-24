@@ -60,12 +60,12 @@ def _recent_notes(limit=10):
 
 
 def _recent_activity(limit=50):
-    """Read activity log written by the adapter."""
+    """Read activity log written by the adapter, newest first."""
     if not ACTIVITY_LOG.exists():
         return []
     lines = ACTIVITY_LOG.read_text().strip().splitlines()
     entries = []
-    for line in lines[-limit:]:
+    for line in reversed(lines[-limit:]):
         try:
             entries.append(json.loads(line))
         except json.JSONDecodeError:
