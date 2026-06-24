@@ -29,6 +29,9 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 static bool wake_word_checking = false;
 
+static audio_ui_cb_t wake_failed_cb = NULL;
+static audio_ui_cb_t recording_ended_cb = NULL;
+
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
 #define AUDIO_EVENT_WAKE_WORD      BIT1
@@ -191,6 +194,7 @@ static void wake_word_task(void *arg)
             wake_word_checking = false;
             if (!recording) {
                 ESP_LOGI(TAG, "No wake word detected, returning to sleep");
+                if (wake_failed_cb) wake_failed_cb();
             }
         }
     }
@@ -284,6 +288,7 @@ void audio_pipeline_stop_recording(void)
                                   mode_str[current_mode]);
         send_len = 0;
     }
+    if (recording_ended_cb) recording_ended_cb();
     ESP_LOGI(TAG, "Recording stopped");
 }
 
@@ -360,4 +365,14 @@ void audio_pipeline_set_docked(bool docked)
 bool audio_pipeline_is_docked(void)
 {
     return pipeline_docked;
+}
+
+void audio_pipeline_set_wake_failed_cb(audio_ui_cb_t cb)
+{
+    wake_failed_cb = cb;
+}
+
+void audio_pipeline_set_recording_ended_cb(audio_ui_cb_t cb)
+{
+    recording_ended_cb = cb;
 }

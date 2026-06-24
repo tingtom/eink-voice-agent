@@ -64,6 +64,7 @@ static app_mode_t current_app_mode = APP_MODE_HOME;
 static sub_state_t current_sub = SUB_MENU;
 static int menu_selection = 0;
 static bool was_charging = false;
+static bool wake_failed_pending = false;
 
 // View notes state
 static int notes_list_offset = 0;
@@ -89,6 +90,18 @@ static app_mode_t menu_mode_map[] = {
     APP_MODE_VIEW_NOTES,
     APP_MODE_SYNC,
 };
+
+static void on_wake_failed(void)
+{
+    if (current_app_mode == APP_MODE_HOME && current_sub == SUB_MENU) {
+        wake_failed_pending = true;
+    }
+}
+
+static void on_recording_ended(void)
+{
+    // Already handled by mode stop functions
+}
 
 static void enter_mode(app_mode_t mode)
 {
@@ -634,6 +647,8 @@ void app_main(void)
     }
 
     audio_pipeline_init();
+    audio_pipeline_set_wake_failed_cb(on_wake_failed);
+    audio_pipeline_set_recording_ended_cb(on_recording_ended);
     ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
     button_set_callback(handle_button);
     button_set_longpress_callback(handle_longpress, 1500);
@@ -659,6 +674,14 @@ void app_main(void)
         ui_update_battery(battery);
         ui_update_wifi_status(wifi_is_connected());
         ui_update_hermes_status(ws_client_is_connected());
+
+        // Handle wake word failure - return to home screen
+        if (wake_failed_pending) {
+            wake_failed_pending = false;
+            if (current_app_mode == APP_MODE_HOME && current_sub == SUB_MENU) {
+                ui_show_home_screen();
+            }
+        }
 
         // ── Charging state transitions ──────────────────────
         bool now_charging = power_is_charging();

@@ -30,3 +30,8 @@ bool audio_pipeline_is_offline_recording(void);
 // Dock control — when docked, VAD and wake word are suppressed
 void audio_pipeline_set_docked(bool docked);
 bool audio_pipeline_is_docked(void);
+
+// UI state callbacks
+typedef void (*audio_ui_cb_t)(void);
+void audio_pipeline_set_wake_failed_cb(audio_ui_cb_t cb);
+void audio_pipeline_set_recording_ended_cb(audio_ui_cb_t cb);
