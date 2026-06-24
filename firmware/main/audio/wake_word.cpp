@@ -126,6 +126,10 @@ static int extract_mfe(const int16_t *samples, int8_t *features_out)
 static bool setup_tflite(void)
 {
     tflite_model = tflite::GetModel(tflite_learn_1037720_5_model);
+    if (!tflite_model) {
+        ESP_LOGE(TAG, "Failed to get model");
+        return false;
+    }
     if (tflite_model->version() != TFLITE_SCHEMA_VERSION) {
         ESP_LOGE(TAG, "Model schema version %d != %d",
                  (int)tflite_model->version(), (int)TFLITE_SCHEMA_VERSION);
@@ -144,13 +148,19 @@ static bool setup_tflite(void)
         tflite_model, resolver, tflite_arena, TFLITE_MODEL_ARENA_SIZE);
     interpreter = &static_interp;
 
-    if (interpreter->AllocateTensors() != kTfLiteOk) {
-        ESP_LOGE(TAG, "Failed to allocate tensors");
+    TfLiteStatus alloc_status = interpreter->AllocateTensors();
+    if (alloc_status != kTfLiteOk) {
+        ESP_LOGE(TAG, "Failed to allocate tensors: status=%d", alloc_status);
         return false;
     }
 
     input_tensor = interpreter->input(0);
     output_tensor = interpreter->output(0);
+
+    if (!input_tensor || !output_tensor) {
+        ESP_LOGE(TAG, "Failed to get input/output tensors");
+        return false;
+    }
 
     if ((size_t)input_tensor->bytes != WAKE_WORD_MODEL_INPUT_SIZE) {
         ESP_LOGE(TAG, "Input size mismatch: expected %d, got %zu",
@@ -196,6 +206,11 @@ extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
     extract_mfe(audio_buf, input_data);
 
     ESP_LOGI(TAG, "Running inference (%d samples accumulated)", MFE_INPUT_SAMPLES);
+    if (!interpreter) {
+        ESP_LOGE(TAG, "Interpreter is null");
+        audio_count = 0;
+        return false;
+    }
     if (interpreter->Invoke() != kTfLiteOk) {
         ESP_LOGE(TAG, "Inference failed");
         audio_count = 0;

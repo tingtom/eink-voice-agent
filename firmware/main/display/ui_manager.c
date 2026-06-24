@@ -148,13 +148,12 @@ void ui_update_recording_viz(int32_t energy)
         prev_heights[i] = h;
     }
 
-    // Pulsing indicator in center
-    int cx = DISPLAY_WIDTH / 2;
-    int cy = 55 + 15;
-    int sizes[] = {4, 6, 8, 10, 8, 6};
-    int s = sizes[recording_frame % 6];
-    epaper_draw_rect(cx - s, cy - s, s * 2, s * 2, 1);
-    recording_frame++;
+    // Clear prev_heights when energy is very low (silence)
+    if (energy < 100) {
+        for (int i = 0; i < bar_count; i++) {
+            prev_heights[i] = 0;
+        }
+    }
 
     epaper_partial_refresh();
 }
