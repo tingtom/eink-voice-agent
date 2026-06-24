@@ -103,14 +103,10 @@ static int extract_mfe(const int16_t *samples, int8_t *features_out)
             mel_energy[m] = 10.0f * log10f(fmaxf(sum, min_power));
         }
 
-        float max_db = mel_energy[0];
-        for (int m = 1; m < MFE_NUM_FILTERS; m++) {
-            if (mel_energy[m] > max_db) max_db = mel_energy[m];
-        }
-
+        // Use fixed normalization: map dB range [MFE_NOISE_FLOOR, -10] to [0, 1]
+        // Based on Edge Impulse's expected range
         for (int m = 0; m < MFE_NUM_FILTERS; m++) {
-            float normalized = (mel_energy[m] - MFE_NOISE_FLOOR) /
-                               (max_db - MFE_NOISE_FLOOR);
+            float normalized = (mel_energy[m] - MFE_NOISE_FLOOR) / (-10.0f - MFE_NOISE_FLOOR);
             if (normalized < 0.0f) normalized = 0.0f;
             if (normalized > 1.0f) normalized = 1.0f;
             feat_buf[f * MFE_NUM_FILTERS + m] = normalized;
