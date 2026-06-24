@@ -3,9 +3,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define REC_MAX_NOTES       100
+#define REC_MAX_NOTES       20
 #define REC_NAME_LEN        16
-#define REC_TEXT_MAX        512
+#define REC_TEXT_MAX        128
 
 #define REC_DIR             "/sdcard/recordings"
 #define PCM_CHUNK_SAMPLES   1024
