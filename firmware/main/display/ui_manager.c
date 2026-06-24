@@ -31,7 +31,7 @@ static void draw_wifi_icon(int x, int y, bool connected)
 
 static void draw_hermes_icon(int x, int y, bool connected)
 {
-    epaper_draw_string(x, y, "WS", 1);
+    epaper_draw_text(x, y, "WS", 1);
     if (!connected) {
         for (int i = 0; i < 8; i++) {
             epaper_draw_pixel(x + i, y + i, 0);
