@@ -31,24 +31,10 @@ static void draw_wifi_icon(int x, int y, bool connected)
 
 static void draw_hermes_icon(int x, int y, bool connected)
 {
-    int cx = x + 4;
-    int cy = y + 4;
-    int r = 4;
-    for (int dy = -r; dy <= r; dy++) {
-        for (int dx = -r; dx <= r; dx++) {
-            if (dx * dx + dy * dy > (r - 1) * (r - 1) && dx * dx + dy * dy <= r * r + 1) {
-                epaper_draw_pixel(cx + dx, cy + dy, 0);
-            }
-        }
-    }
     if (connected) {
-        for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                if (dx * dx + dy * dy <= 4) {
-                    epaper_draw_pixel(cx + dx, cy + dy, 0);
-                }
-            }
-        }
+        epaper_draw_string(x, y, "WS", 1);
+    } else {
+        epaper_draw_string(x, y, "WS/", 1);
     }
 }
 
