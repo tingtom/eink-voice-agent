@@ -31,10 +31,11 @@ static void draw_wifi_icon(int x, int y, bool connected)
 
 static void draw_hermes_icon(int x, int y, bool connected)
 {
-    if (connected) {
-        epaper_draw_string(x, y, "WS", 1);
-    } else {
-        epaper_draw_string(x, y, "WS/", 1);
+    epaper_draw_string(x, y, "WS", 1);
+    if (!connected) {
+        for (int i = 0; i < 8; i++) {
+            epaper_draw_pixel(x + i, y + i, 0);
+        }
     }
 }
 
@@ -51,7 +52,7 @@ static void draw_status_bar(void)
 {
     int x = 2;
     draw_wifi_icon(x, 2, wifi_ok);
-    x += 16;
+    x += 22;
     draw_hermes_icon(x, 2, hermes_ok);
     x += 12;
     epaper_draw_text(x, 1, status_text, 8);

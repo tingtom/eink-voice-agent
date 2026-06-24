@@ -29,9 +29,6 @@ static bool offline_recording = false;
 static bool pipeline_docked = false;
 static bool wake_word_checking = false;
 
-int16_t send_buf[VAD_BURST_SAMPLES * 4];
-size_t send_len = 0;
-
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
 #define AUDIO_EVENT_WAKE_WORD      BIT1
@@ -41,6 +38,9 @@ static EventGroupHandle_t audio_events;
 #define VAD_CONFIRM_FRAMES  2
 
 #define UI_UPDATE_INTERVAL_US  (300 * 1000)
+
+int16_t send_buf[VAD_BURST_SAMPLES * 4];
+size_t send_len = 0;
 
 static void audio_capture_task(void *arg)
 {
