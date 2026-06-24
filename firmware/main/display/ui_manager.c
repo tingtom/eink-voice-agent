@@ -217,16 +217,6 @@ void ui_show_provisioning_screen(const char *ap_name, const char *url)
     epaper_full_refresh();
 }
 
-static void draw_charging_bolt(int x, int y)
-{
-    epaper_draw_line(x + 4, y, x + 1, y + 10);
-    epaper_draw_line(x + 1, y + 10, x + 6, y + 10);
-    epaper_draw_line(x + 6, y + 10, x + 2, y + 20);
-    epaper_draw_line(x + 2, y + 20, x + 7, y + 10);
-    epaper_draw_line(x + 7, y + 10, x + 2, y + 10);
-    epaper_draw_line(x + 2, y + 10, x + 5, y);
-}
-
 static void draw_battery_icon_charging(int x, int y, int pct)
 {
     int bw = 18, bh = 8;
