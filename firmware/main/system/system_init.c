@@ -13,8 +13,8 @@ static const char *TAG = "SYSTEM";
 #define TCA9554_INPUT        0x00
 #define TCA9554_OUTPUT       0x01
 #define TCA9554_CONFIG       0x03
-#define TCA9554_PROBE_TIMEOUT pdMS_TO_TICKS(5)
-#define TCA9554_XFER_TIMEOUT  pdMS_TO_TICKS(100)
+#define TCA9554_PROBE_TIMEOUT 50
+#define TCA9554_XFER_TIMEOUT  100
 
 static i2c_master_bus_handle_t i2c_bus = NULL;
 static i2c_master_dev_handle_t tca9554_dev = NULL;
@@ -163,6 +163,12 @@ void system_init(void)
     i2c_bus_init();
 
     ESP_LOGI(TAG, "Scanning I2C bus for PCA9554A/TCA9554...");
+    // Scan entire bus and log all responding addresses for debug
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        if (i2c_master_probe(i2c_bus, addr, pdMS_TO_TICKS(10)) == ESP_OK) {
+            ESP_LOGI(TAG, "  I2C device found at 0x%02X", addr);
+        }
+    }
     if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
         tca9554_present = true;
         ESP_LOGI(TAG, "PCA9554A (I/O expander) found at 0x3F");
