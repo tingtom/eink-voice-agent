@@ -676,14 +676,16 @@ void app_main(void)
     ESP_LOGI(TAG, "Stage 7 OK: WiFi creds loaded");
     bod_save_stage("wifi_start");
 
-    // Init audio DMA buffers before WiFi (WiFi consumes ~17KB of DMA heap
-    // for static RX buffers, leaving insufficient contiguous DMA memory).
-    i2c_bus_init();
-    es8311_init();
-
     wifi_init();
     esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
+
+    // Allocate I2S DMA buffers between wifi_init and wifi_connect.
+    // wifi_init creates control structures (small), wifi_connect calls
+    // esp_wifi_start which allocates ~17KB of static DMA RX buffers.
+    // I2S needs its ~4KB of DMA before that pool is consumed.
+    i2c_bus_init();
+    es8311_init();
 
     // On battery: cap WiFi TX power to reduce peak-current brownout risk.
     // esp_wifi_set_max_tx_power value is in 0.25dBm units; default is ~78 (+19.5dBm).
