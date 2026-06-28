@@ -2,6 +2,10 @@
 
 Mounted at /api/plugins/eink-voice-agent/ by the Hermes dashboard.
 Shows device activity, todos, and notes managed by the plugin.
+
+CORS is not needed here — the dashboard serves both frontend and API
+on the same origin (port 9119). The device server (port 8123) handles
+CORS for cross-origin requests from the dashboard frontend.
 """
 import json
 import logging
@@ -127,6 +131,7 @@ class TelemetryData(BaseModel):
     wake_count: int | None = None
     storage_free_kb: int | None = None
     recording_time_remaining_sec: int | None = None
+    last_seen: str | None = None
     updated_at: str | None = None
 
 

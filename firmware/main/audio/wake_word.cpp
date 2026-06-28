@@ -77,20 +77,27 @@ static void fft_256(float *re, float *im)
 
 static int extract_mfe(const int16_t *samples, int8_t *features_out)
 {
+    static float preemph[MFE_INPUT_SAMPLES];
     static float re[MFE_FFT_SIZE];
     static float im[MFE_FFT_SIZE];
-    static float mel_energy[MFE_NUM_FILTERS];
     static float feat_buf[MFE_NUM_FRAMES * MFE_NUM_FILTERS];
 
-    const float min_power = powf(10.0f, MFE_NOISE_FLOOR / 10.0f);
+    // Step 1: Preemphasis: y[n] = x[n] - 0.98 * x[n-1], then rescale to [-1, 1]
+    for (int i = 0; i < MFE_INPUT_SAMPLES; i++) {
+        float cur = (float)samples[i] / 32768.0f;
+        float prev = (i > 0) ? 0.98f * (float)samples[i - 1] / 32768.0f : 0.0f;
+        preemph[i] = cur - prev;
+    }
+
+    const float noise_floor = MFE_NOISE_FLOOR * -1.0f;               // 52
+    const float noise_scale = 1.0f / (noise_floor + 12.0f);          // 1/64
     const float inv_scale = 1.0f / INPUT_QUANT_SCALE;
     const int zp = INPUT_QUANT_ZP;
 
     for (int f = 0; f < MFE_NUM_FRAMES; f++) {
         int start = f * MFE_FRAME_STRIDE;
         for (int i = 0; i < MFE_FFT_SIZE; i++) {
-            float s = (float)samples[start + i] / 32768.0f;
-            re[i] = s * mfe_hann_window[i];
+            re[i] = preemph[start + i] * mfe_hann_window[i];
         }
         memset(im, 0, sizeof(im));
         fft_256(re, im);
@@ -98,17 +105,18 @@ static int extract_mfe(const int16_t *samples, int8_t *features_out)
         for (int m = 0; m < MFE_NUM_FILTERS; m++) {
             float sum = 0.0f;
             for (int k = 0; k < 129; k++) {
-                sum += mfe_filterbank[m][k] * (re[k] * re[k] + im[k] * im[k]);
+                float power = (1.0f / MFE_FFT_SIZE) * (re[k] * re[k] + im[k] * im[k]);
+                sum += mfe_filterbank[m][k] * power;
             }
-            mel_energy[m] = 10.0f * log10f(fmaxf(sum, min_power));
-        }
+            if (sum < 1e-30f) sum = 1e-30f;
+            float db_val = 10.0f * log10f(sum);
 
-        // Use fixed normalization: map dB range [MFE_NOISE_FLOOR, -10] to [0, 1]
-        // Based on Edge Impulse's expected range
-        for (int m = 0; m < MFE_NUM_FILTERS; m++) {
-            float normalized = (mel_energy[m] - MFE_NOISE_FLOOR) / (-10.0f - MFE_NOISE_FLOOR);
+            // Normalize: (db + 52) / 64 → maps [-52, 12] dB to [0, 1]
+            float normalized = (db_val + noise_floor) * noise_scale;
             if (normalized < 0.0f) normalized = 0.0f;
             if (normalized > 1.0f) normalized = 1.0f;
+            // 8-bit requantization (simulate training-time quantization)
+            normalized = roundf(normalized * 256.0f) / 256.0f;
             feat_buf[f * MFE_NUM_FILTERS + m] = normalized;
         }
     }

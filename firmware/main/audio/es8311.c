@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_codec_dev.h"
+#include "esp_codec_dev_defaults.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "freertos/FreeRTOS.h"
@@ -11,275 +12,269 @@
 
 static const char *TAG = "ES8311";
 
-static i2c_master_dev_handle_t es8311_i2c_dev = NULL;
+static esp_codec_dev_handle_t g_playback_handle = NULL;
+static esp_codec_dev_handle_t g_record_handle = NULL;
+static i2s_chan_handle_t g_tx = NULL;
+static i2s_chan_handle_t g_rx = NULL;
+static const audio_codec_ctrl_if_t *g_ctrl_if = NULL;
+static const audio_codec_data_if_t *g_data_if = NULL;
+static const audio_codec_if_t *g_codec_if = NULL;
 
-static esp_err_t es8311_write_reg(uint8_t reg, uint8_t val)
+static esp_err_t es8311_i2s_init(void)
 {
-    uint8_t buf[2] = {reg, val};
-    return i2c_master_transmit(es8311_i2c_dev, buf, 2, pdMS_TO_TICKS(100));
+    i2s_chan_config_t chan_cfg = {
+        .id = I2S_PORT,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = 2,
+        .dma_frame_num = 128,
+        .auto_clear = true,
+    };
+
+    i2s_chan_handle_t tx = NULL, rx = NULL;
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = AUDIO_SAMPLE_RATE,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+        },
+        .slot_cfg = {
+            .slot_mode = I2S_SLOT_MODE_STEREO,
+            .slot_mask = I2S_STD_SLOT_BOTH,
+            .ws_width = 32,
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .bit_shift = true,
+        },
+        .gpio_cfg = {
+            .mclk = I2S_MCLK_GPIO,
+            .bclk = I2S_BCLK_GPIO,
+            .ws = I2S_WS_GPIO,
+            .dout = I2S_DOUT_GPIO,
+            .din = I2S_DIN_GPIO,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+
+    i2s_new_channel(&chan_cfg, &tx, &rx);
+    i2s_channel_init_std_mode(rx, &std_cfg);
+    i2s_channel_init_std_mode(tx, &std_cfg);
+
+    g_tx = tx;
+    g_rx = rx;
+    return ESP_OK;
 }
 
-static esp_err_t es8311_read_reg(uint8_t reg, uint8_t *val)
+static void es8311_i2s_deinit(void)
 {
-    esp_err_t ret = i2c_master_transmit(es8311_i2c_dev, &reg, 1, pdMS_TO_TICKS(100));
-    if (ret != ESP_OK) return ret;
-    return i2c_master_receive(es8311_i2c_dev, val, 1, pdMS_TO_TICKS(100));
-}
-
-static void es8311_set_bits(uint8_t reg, uint8_t mask, uint8_t val)
-{
-    uint8_t old = 0;
-    esp_err_t ret = es8311_read_reg(reg, &old);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to read reg 0x%02X: %s", reg, esp_err_to_name(ret));
-        return;
+    if (g_tx) {
+        i2s_channel_disable(g_tx);
+        i2s_del_channel(g_tx);
+        g_tx = NULL;
     }
-    uint8_t new_val = (old & ~mask) | (val & mask);
-    es8311_write_reg(reg, new_val);
-}
-
-static esp_err_t es8311_i2c_init(void *bus_handle)
-{
-    i2c_master_dev_handle_t dev;
-    i2c_master_bus_handle_t bus = (i2c_master_bus_handle_t)bus_handle;
-    esp_err_t ret = i2c_master_bus_add_device(bus, &(i2c_device_config_t){
-        .device_address = 0x18,
-        .scl_speed_hz = 100000,
-    }, &dev);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add ES8311 to I2C bus: %s", esp_err_to_name(ret));
-        return ret;
+    if (g_rx) {
+        i2s_del_channel(g_rx);
+        g_rx = NULL;
     }
-    es8311_i2c_dev = dev;
-    ESP_LOGI(TAG, "ES8311 I2C device added at 0x18");
-    return ESP_OK;
 }
 
-static esp_err_t es8311_chip_id_check(void)
+esp_err_t es8311_init(void)
 {
-    uint8_t id = 0;
-    esp_err_t ret = es8311_read_reg(0xFD, &id);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read chip ID: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    if (id != 0x83) {
-        ESP_LOGE(TAG, "Bad ES8311 chip ID: 0x%02X (expected 0x83)", id);
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-    ESP_LOGI(TAG, "ES8311 chip ID verified: 0x%02X", id);
-    return ESP_OK;
-}
-
-static void es8311_reset(void)
-{
-    es8311_write_reg(0x00, 0x1F);
-    vTaskDelay(pdMS_TO_TICKS(100));
-    es8311_write_reg(0x00, 0x00);
-    vTaskDelay(pdMS_TO_TICKS(50));
-}
-
-static esp_err_t es8311_clock_config(void)
-{
-    // MCLK division: 256fs for 16kHz → MCLK = 4.096MHz (assuming 256*16k)
-    // Set MCLK=256*fs, no MCLK input (internal)
-    esp_err_t ret;
-    ret = es8311_write_reg(0x01, 0x3F);  // CLK_MANAGER: MCLK from internal, divide by 256
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x02, 0x00);  // slave mode
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x03, 0x10);  // 256fs
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x04, 0x10);  // sample rate = 16k
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x05, 0x00);  // bclk_div = 1
-    if (ret != ESP_OK) return ret;
-
-    // WaveShare reference for 16kHz:
-    // REG01=0x3F, REG02=0x00, REG03=0x10, REG04=0x10, REG05=0x00
-    // REG06=0x00, REG07=0x7E
-    ret = es8311_write_reg(0x06, 0x00);
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x07, 0x7E);
-    if (ret != ESP_OK) return ret;
-
-    return ESP_OK;
-}
-
-static esp_err_t es8311_system_config(void)
-{
-    esp_err_t ret;
-    // System reg 0x0B: all off
-    ret = es8311_write_reg(0x0B, 0x00);
-    if (ret != ESP_OK) return ret;
-
-    // System reg 0x0C: DACR→LOUT1, DACL→ROUT1
-    ret = es8311_write_reg(0x0C, 0x18);
-    if (ret != ESP_OK) return ret;
-
-    // System reg 0x10: 0x1F
-    ret = es8311_write_reg(0x10, 0x1F);
-    if (ret != ESP_OK) return ret;
-
-    // System reg 0x11: 0x7F
-    ret = es8311_write_reg(0x11, 0x7F);
-    if (ret != ESP_OK) return ret;
-
-    // Reset: power down, then release
-    ret = es8311_write_reg(0x00, 0x80);
-    if (ret != ESP_OK) return ret;
-
-    uint8_t val = 0;
-    ret = es8311_read_reg(0x00, &val);
-    if (ret != ESP_OK) return ret;
-    // Slave mode: bit 6 = 0
-    val &= ~0x40;
-    ret = es8311_write_reg(0x00, val);
-    if (ret != ESP_OK) return ret;
-
-    // Clock manager: use MCLK, not inverted
-    ret = es8311_write_reg(0x01, 0x3F);
-    if (ret != ESP_OK) return ret;
-
-    // SCLK not inverted
-    ret = es8311_read_reg(0x06, &val);
-    if (ret != ESP_OK) return ret;
-    val &= ~0x20;
-    ret = es8311_write_reg(0x06, val);
-    if (ret != ESP_OK) return ret;
-
-    return ESP_OK;
-}
-
-static esp_err_t es8311_adc_config(void)
-{
-    esp_err_t ret;
-    ret = es8311_write_reg(0x13, 0x10);
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x1B, 0x0A);
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x1C, 0x6A);
-    if (ret != ESP_OK) return ret;
-    ret = es8311_write_reg(0x16, 0x24);
-    if (ret != ESP_OK) return ret;
-
-    // GPIO: enable ADCL+DACR reference
-    ret = es8311_write_reg(0x44, 0x58);
-    if (ret != ESP_OK) return ret;
-
-    return ESP_OK;
-}
-
-static esp_err_t es8311_dac_config(void)
-{
-    esp_err_t ret;
-    // DAC output routing: DACR→LOUT1, DACL→ROUT1
-    ret = es8311_write_reg(0x0C, 0x18);
-    if (ret != ESP_OK) return ret;
-
-    // DAC enable
-    ret = es8311_write_reg(0x12, 0x01);
-    if (ret != ESP_OK) return ret;
-
-    // Unmute L/R
-    ret = es8311_write_reg(0x31, 0x00);
-    if (ret != ESP_OK) return ret;
-
-    // Volume: 0x3F = 0dB (max)
-    ret = es8311_write_reg(0x32, 0x3F);
-    if (ret != ESP_OK) return ret;
-
-    // Analog: DAC+ADC on
-    ret = es8311_write_reg(0x0D, 0xFA);
-    if (ret != ESP_OK) return ret;
-
-    // Analog block on
-    ret = es8311_write_reg(0x0E, 0x06);
-    if (ret != ESP_OK) return ret;
-
-    return ESP_OK;
-}
-
-static esp_err_t es8311_i2s_config(void)
-{
-    // SDPIN (REG09): I2S format = standard I2S
-    es8311_set_bits(0x09, 0xE0, 0x00);
-    // SDPOUT (REG0A): I2S format = standard I2S
-    es8311_set_bits(0x0A, 0xE0, 0x00);
-
-    return ESP_OK;
-}
-
-esp_err_t es8311_init(i2s_chan_handle_t tx_handle)
-{
-    (void)tx_handle;
-    esp_err_t ret;
-
-    void *bus_handle = get_i2c_bus_handle();
-    if (!bus_handle) {
-        ESP_LOGE(TAG, "I2C bus not initialized");
+    void *bus = get_i2c_bus_handle();
+    if (!bus) {
+        ESP_LOGE(TAG, "I2C bus not initialized — call i2c_bus_init() first");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ret = es8311_i2c_init(bus_handle);
-    if (ret != ESP_OK) return ret;
+    board_power_audio_on();
 
-    ret = es8311_chip_id_check();
-    if (ret != ESP_OK) return ret;
-
-    es8311_reset();
-    ESP_LOGI(TAG, "Work in Slave mode");
-
-    ret = es8311_clock_config();
+    esp_err_t ret = es8311_i2s_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Clock config failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "I2S init failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = es8311_system_config();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "System config failed: %s", esp_err_to_name(ret));
-        return ret;
+    audio_codec_i2c_cfg_t i2c_cfg = {
+        .port = I2C_PORT,
+        .addr = ES8311_CODEC_DEFAULT_ADDR,
+        .bus_handle = bus,
+    };
+    g_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    if (!g_ctrl_if) {
+        ESP_LOGE(TAG, "Failed to create I2C control interface");
+        es8311_i2s_deinit();
+        return ESP_FAIL;
     }
 
-    ret = es8311_adc_config();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ADC config failed: %s", esp_err_to_name(ret));
-        return ret;
+    audio_codec_i2s_cfg_t i2s_cfg = {
+        .port = I2S_PORT,
+        .rx_handle = (void *)g_rx,
+        .tx_handle = (void *)g_tx,
+        .clk_src = 0,
+    };
+    g_data_if = audio_codec_new_i2s_data(&i2s_cfg);
+    if (!g_data_if) {
+        ESP_LOGE(TAG, "Failed to create I2S data interface");
+        audio_codec_delete_ctrl_if(g_ctrl_if);
+        g_ctrl_if = NULL;
+        es8311_i2s_deinit();
+        return ESP_FAIL;
     }
 
-    ret = es8311_dac_config();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "DAC config failed: %s", esp_err_to_name(ret));
-        return ret;
+    es8311_codec_cfg_t codec_cfg = {
+        .ctrl_if = g_ctrl_if,
+        .gpio_if = NULL,
+        .codec_mode = ESP_CODEC_DEV_WORK_MODE_BOTH,
+        .pa_pin = -1,
+        .pa_reverted = false,
+        .master_mode = false,
+        .use_mclk = true,
+        .digital_mic = false,
+        .invert_mclk = false,
+        .invert_sclk = false,
+        .hw_gain = {
+            .pa_voltage = 5.0f,
+            .codec_dac_voltage = 3.3f,
+            .pa_gain = 0.0f,
+        },
+        .no_dac_ref = true,
+        .mclk_div = 256,
+    };
+    g_codec_if = es8311_codec_new(&codec_cfg);
+    if (!g_codec_if) {
+        ESP_LOGE(TAG, "Failed to create ES8311 codec interface");
+        audio_codec_delete_data_if(g_data_if);
+        g_data_if = NULL;
+        audio_codec_delete_ctrl_if(g_ctrl_if);
+        g_ctrl_if = NULL;
+        es8311_i2s_deinit();
+        return ESP_FAIL;
     }
 
-    ret = es8311_i2s_config();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2S config failed: %s", esp_err_to_name(ret));
-        return ret;
+    esp_codec_dev_cfg_t out_cfg = {
+        .dev_type = ESP_CODEC_DEV_TYPE_OUT,
+        .codec_if = g_codec_if,
+        .data_if = g_data_if,
+    };
+    g_playback_handle = esp_codec_dev_new(&out_cfg);
+    if (!g_playback_handle) {
+        ESP_LOGE(TAG, "Failed to create playback device");
+        audio_codec_delete_codec_if(g_codec_if);
+        g_codec_if = NULL;
+        audio_codec_delete_data_if(g_data_if);
+        g_data_if = NULL;
+        audio_codec_delete_ctrl_if(g_ctrl_if);
+        g_ctrl_if = NULL;
+        es8311_i2s_deinit();
+        return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "ES8311 initialized (raw I2C)");
+    esp_codec_dev_cfg_t in_cfg = {
+        .dev_type = ESP_CODEC_DEV_TYPE_IN,
+        .codec_if = g_codec_if,
+        .data_if = g_data_if,
+    };
+    g_record_handle = esp_codec_dev_new(&in_cfg);
+    if (!g_record_handle) {
+        ESP_LOGE(TAG, "Failed to create record device");
+        esp_codec_dev_delete(g_playback_handle);
+        g_playback_handle = NULL;
+        audio_codec_delete_codec_if(g_codec_if);
+        g_codec_if = NULL;
+        audio_codec_delete_data_if(g_data_if);
+        g_data_if = NULL;
+        audio_codec_delete_ctrl_if(g_ctrl_if);
+        g_ctrl_if = NULL;
+        es8311_i2s_deinit();
+        return ESP_FAIL;
+    }
+
+    esp_codec_dev_sample_info_t fs = {
+        .sample_rate = AUDIO_SAMPLE_RATE,
+        .channel = 1,
+        .bits_per_sample = 16,
+        .channel_mask = 0,
+        .mclk_multiple = 256,
+    };
+
+    int open_ret = esp_codec_dev_open(g_playback_handle, &fs);
+    if (open_ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "Failed to open playback device: %d", open_ret);
+        goto fail;
+    }
+
+    open_ret = esp_codec_dev_open(g_record_handle, &fs);
+    if (open_ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "Failed to open record device: %d", open_ret);
+        esp_codec_dev_close(g_playback_handle);
+        goto fail;
+    }
+
+    esp_codec_set_disable_when_closed(g_playback_handle, false);
+    esp_codec_set_disable_when_closed(g_record_handle, false);
+
+    ESP_LOGI(TAG, "ES8311 initialized (esp_codec_dev, %d Hz, mono 16-bit)", AUDIO_SAMPLE_RATE);
     return ESP_OK;
+
+fail:
+    esp_codec_dev_delete(g_record_handle);
+    g_record_handle = NULL;
+    esp_codec_dev_delete(g_playback_handle);
+    g_playback_handle = NULL;
+    audio_codec_delete_codec_if(g_codec_if);
+    g_codec_if = NULL;
+    audio_codec_delete_data_if(g_data_if);
+    g_data_if = NULL;
+    audio_codec_delete_ctrl_if(g_ctrl_if);
+    g_ctrl_if = NULL;
+    es8311_i2s_deinit();
+    return ESP_FAIL;
 }
 
 void es8311_set_volume(uint8_t vol)
 {
     if (vol > 100) vol = 100;
-    uint8_t reg = (uint8_t)((vol / 100.0f) * 0x3F);
-    es8311_write_reg(0x32, reg);
+    if (g_playback_handle) {
+        esp_codec_dev_set_out_vol(g_playback_handle, vol);
+    }
 }
 
 void es8311_deinit(void)
 {
-    if (es8311_i2c_dev) {
-        i2c_master_bus_rm_device(es8311_i2c_dev);
-        es8311_i2c_dev = NULL;
+    if (g_record_handle) {
+        esp_codec_dev_close(g_record_handle);
+        esp_codec_dev_delete(g_record_handle);
+        g_record_handle = NULL;
     }
+    if (g_playback_handle) {
+        esp_codec_dev_close(g_playback_handle);
+        esp_codec_dev_delete(g_playback_handle);
+        g_playback_handle = NULL;
+    }
+    if (g_codec_if) {
+        audio_codec_delete_codec_if(g_codec_if);
+        g_codec_if = NULL;
+    }
+    if (g_data_if) {
+        audio_codec_delete_data_if(g_data_if);
+        g_data_if = NULL;
+    }
+    if (g_ctrl_if) {
+        audio_codec_delete_ctrl_if(g_ctrl_if);
+        g_ctrl_if = NULL;
+    }
+    es8311_i2s_deinit();
+    ESP_LOGI(TAG, "ES8311 deinitialized");
 }
 
-esp_codec_dev_handle_t es8311_get_handle(void)
+esp_codec_dev_handle_t es8311_get_playback_handle(void)
 {
-    return NULL;
+    return g_playback_handle;
+}
+
+esp_codec_dev_handle_t es8311_get_record_handle(void)
+{
+    return g_record_handle;
 }

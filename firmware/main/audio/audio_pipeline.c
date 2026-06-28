@@ -4,7 +4,7 @@
 #include "http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "driver/i2s_std.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -26,7 +26,6 @@
 static const char *TAG = "AUDIO_PIPELINE";
 
 static ringbuffer_t audio_rb;
-static i2s_chan_handle_t g_tx_handle = NULL;
 static bool recording = false;
 static bool processing = false;
 static bool playback_active = false;
@@ -38,6 +37,8 @@ static bool wake_word_checking = false;
 static audio_ui_cb_t wake_failed_cb = NULL;
 static audio_ui_cb_t wake_detected_cb = NULL;
 static audio_ui_cb_t recording_ended_cb = NULL;
+static response_cb_t response_cb = NULL;
+static char cached_response[512] = "";
 
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
@@ -289,74 +290,13 @@ static void wake_word_task(void *arg)
     }
 }
 
-static void audio_i2s_duplex_init(i2s_chan_handle_t *out_tx)
-{
-    i2s_chan_config_t chan_cfg = {
-        .id = I2S_PORT,
-        .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 2,
-        .dma_frame_num = 128,
-        .auto_clear = true,
-    };
-
-    i2s_chan_handle_t tx = NULL, rx = NULL;
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx, &rx));
-
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = {
-            .sample_rate_hz = AUDIO_SAMPLE_RATE,
-            .clk_src = I2S_CLK_SRC_DEFAULT,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-        },
-        .slot_cfg = {
-            .slot_mode = I2S_SLOT_MODE_STEREO,
-            .slot_mask = I2S_STD_SLOT_BOTH,
-            .ws_width = 32,
-            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
-            .bit_shift = true,
-        },
-        .gpio_cfg = {
-            .mclk = I2S_MCLK_GPIO,
-            .bclk = I2S_BCLK_GPIO,
-            .ws = I2S_WS_GPIO,
-            .dout = I2S_DOUT_GPIO,
-            .din = I2S_DIN_GPIO,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false,
-            },
-        },
-    };
-
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx, &std_cfg));
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx, &std_cfg));
-    ESP_ERROR_CHECK(i2s_channel_enable(tx));
-
-    g_tx_handle = tx;
-    *out_tx = tx;
-
-    speaker_init();
-    mic_set_handle(rx);
-
-    ESP_LOGI(TAG, "I2S duplex initialized (%d Hz, stereo)", AUDIO_SAMPLE_RATE);
-}
-
-i2s_chan_handle_t audio_get_tx_handle(void)
-{
-    return g_tx_handle;
-}
-
 void audio_pipeline_init(void)
 {
     ringbuffer_init(&audio_rb, AUDIO_BUFFER_SIZE);
-    i2s_chan_handle_t tx = NULL;
-    audio_i2s_duplex_init(&tx);
-    esp_err_t ret = es8311_init(tx);
+    esp_err_t ret = es8311_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ES8311 init failed: %s", esp_err_to_name(ret));
     }
-    board_power_audio_on();
     wake_word_init();
     vad_init();
 
@@ -367,7 +307,6 @@ void audio_pipeline_init(void)
     xTaskCreate(anim_task, "anim", 2048, NULL, 3, NULL);
     xTaskCreate(vad_task, "vad", 4096, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
-    mic_start();
     ESP_LOGI(TAG, "Audio pipeline initialized (two-stage VAD + wake word)");
 }
 
@@ -403,6 +342,78 @@ void audio_pipeline_stop_processing(void)
     processing = false;
 }
 
+// Extract string value from JSON: search for "\"key\":\"" then read until next '"'
+// Returns pointer to value text (null-terminated in-place) or NULL if not found.
+static const char *json_extract_string(const char *json, const char *key)
+{
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    const char *start = strstr(json, pattern);
+    if (!start) return NULL;
+    start += strlen(pattern);
+    const char *end = strchr(start, '"');
+    if (!end) return NULL;
+    char *val = (char *)start;
+    val[end - start] = '\0';
+    return start;
+}
+
+static void response_poll_task(void *arg)
+{
+    (void)arg;
+    char url[192];
+    snprintf(url, sizeof(url), "%s/api/device/response?chat_id=eink:%s",
+             HERMES_HTTP_URL, DEVICE_ID);
+
+    char resp[1024];
+    int retries = 0;
+    const int max_retries = 13;
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    if (cached_response[0] != '\0') {
+        ESP_LOGI(TAG, "Response from cache: %.100s", cached_response);
+        if (response_cb) response_cb(cached_response);
+        cached_response[0] = '\0';
+        goto done;
+    }
+
+    while (retries < max_retries) {
+        if (!processing) {
+            ESP_LOGI(TAG, "Response poll cancelled");
+            goto done;
+        }
+
+        resp[0] = '\0';
+        esp_err_t ret = http_get_json(url, resp, sizeof(resp) - 1);
+        if (ret != ESP_OK) {
+            retries++;
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            continue;
+        }
+        resp[sizeof(resp) - 1] = '\0';
+
+        const char *type = json_extract_string(resp, "type");
+        if (type && strcmp(type, "response") == 0) {
+            const char *data = json_extract_string(resp, "data");
+            if (data) {
+                ESP_LOGI(TAG, "Response received: %.100s", data);
+                if (response_cb) response_cb(data);
+                goto done;
+            }
+        }
+
+        retries++;
+        vTaskDelay(pdMS_TO_TICKS(1500));
+    }
+
+    ESP_LOGW(TAG, "Response poll timed out");
+    if (response_cb) response_cb("Response timed out");
+
+done:
+    vTaskDelete(NULL);
+}
+
 void audio_pipeline_send_end_recording(void)
 {
     const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
@@ -415,9 +426,19 @@ void audio_pipeline_send_end_recording(void)
     esp_err_t ret = http_post_json(url, json, resp, sizeof(resp));
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "http_audio: end POST failed: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG, "End of recording sent (mode=%s)", mode_str[current_mode]);
+        return;
     }
+    ESP_LOGI(TAG, "End of recording sent (mode=%s)", mode_str[current_mode]);
+
+    resp[sizeof(resp) - 1] = '\0';
+    cached_response[0] = '\0';
+    const char *data = json_extract_string(resp, "data");
+    if (data && !strstr(data, "Audio received") && !strstr(data, "command processed")) {
+        strlcpy(cached_response, data, sizeof(cached_response));
+        ESP_LOGI(TAG, "Cached end response (%.100s)", cached_response);
+    }
+
+    xTaskCreate(response_poll_task, "resp_poll", 4096, NULL, 3, NULL);
 }
 
 audio_mode_t audio_pipeline_get_current_mode(void)
@@ -494,4 +515,9 @@ void audio_pipeline_set_wake_detected_cb(audio_ui_cb_t cb)
 void audio_pipeline_set_recording_ended_cb(audio_ui_cb_t cb)
 {
     recording_ended_cb = cb;
+}
+
+void audio_pipeline_set_response_cb(response_cb_t cb)
+{
+    response_cb = cb;
 }

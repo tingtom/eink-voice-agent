@@ -140,7 +140,14 @@ void ui_show_menu(const char **items, int count, int selected)
     epaper_partial_refresh();
 }
 
-static int prev_heights[12] = {0};
+#define VIZ_BAR_COUNT 16
+#define VIZ_BAR_W 10
+#define VIZ_GAP 2
+#define VIZ_MAX_H 40
+#define VIZ_Y 80
+
+static int viz_buf[VIZ_BAR_COUNT];
+static int viz_prev[VIZ_BAR_COUNT];
 static int recording_frame = 0;
 
 void ui_show_recording_screen(void)
@@ -150,35 +157,38 @@ void ui_show_recording_screen(void)
     epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Listening...", 12);
     draw_status_bar();
     ui_draw_button_help("cancel -", NULL);
-    epaper_partial_refresh();
     recording_frame = 0;
-    for (int i = 0; i < 12; i++) prev_heights[i] = 0;
+    for (int i = 0; i < VIZ_BAR_COUNT; i++) {
+        viz_buf[i] = 0;
+        viz_prev[i] = 0;
+    }
+    epaper_partial_refresh();
 }
 
 void ui_update_recording_viz(int32_t energy)
 {
-    int bar_count = 12;
-    int bar_w = 14;
-    int gap = 2;
-    int total_w = bar_count * (bar_w + gap) - gap;
+    int total_w = VIZ_BAR_COUNT * (VIZ_BAR_W + VIZ_GAP) - VIZ_GAP;
     int start_x = (DISPLAY_WIDTH - total_w) / 2;
-    int max_h = 40;
-    int base_y = 80;
 
-    for (int i = 0; i < bar_count; i++) {
-        float t = (float)(i + 1) / bar_count;
-        int h = (int)((energy * max_h * t) / 500);
-        if (h < 2) h = 2;
-        if (h > max_h) h = max_h;
+    // Shift buffer left — oldest falls off, new data enters on the right
+    for (int i = 0; i < VIZ_BAR_COUNT - 1; i++) {
+        viz_buf[i] = viz_buf[i + 1];
+    }
+    int h = (energy * VIZ_MAX_H) / 500;
+    if (h < 2) h = 2;
+    if (h > VIZ_MAX_H) h = VIZ_MAX_H;
+    viz_buf[VIZ_BAR_COUNT - 1] = h;
 
-        int x = start_x + i * (bar_w + gap);
-        if (h > prev_heights[i]) {
-            epaper_draw_rect(x, base_y + (max_h - h), bar_w, h, 1);
-        } else if (h < prev_heights[i]) {
-            epaper_draw_rect(x, base_y + (max_h - prev_heights[i]), bar_w, prev_heights[i], 0);
-            epaper_draw_rect(x, base_y + (max_h - h), bar_w, h, 1);
+    // Draw bars left-to-right (oldest → newest), only redraw changed pixels
+    for (int i = 0; i < VIZ_BAR_COUNT; i++) {
+        int val = viz_buf[i];
+        int x = start_x + i * (VIZ_BAR_W + VIZ_GAP);
+        if (val != viz_prev[i]) {
+            if (viz_prev[i] > 0)
+                epaper_clear_rect(x, VIZ_Y + (VIZ_MAX_H - viz_prev[i]), VIZ_BAR_W, viz_prev[i]);
+            epaper_draw_rect(x, VIZ_Y + (VIZ_MAX_H - val), VIZ_BAR_W, val, 1);
+            viz_prev[i] = val;
         }
-        prev_heights[i] = h;
     }
 
     epaper_partial_refresh();
@@ -267,29 +277,12 @@ void ui_show_docked_screen(void)
     epaper_partial_refresh();
 }
 
-static void draw_moon_icon(int x, int y)
-{
-    int r = 5;
-    for (int dy = -r; dy <= r; dy++) {
-        for (int dx = -r; dx <= r; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 <= r * r && d2 >= (r - 1) * (r - 1))
-                epaper_draw_pixel(x + dx, y + dy, 0);
-        }
-    }
-    for (int dy = -2; dy <= 2; dy++) {
-        for (int dx = 0; dx <= 2; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 <= 3 * 3) epaper_draw_pixel(x + dx, y + dy, 1);
-        }
-    }
-}
-
 void ui_show_sleep_screen(void)
 {
     epaper_clear();
-    draw_moon_icon(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2 - 10);
-    epaper_draw_text(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2 + 10, "Sleeping...", 12);
+    epaper_draw_text(115, 50, "z", 21);
+    epaper_draw_text(90, 80, "zz", 14);
+    epaper_draw_text(70, 110, "zzz", 8);
     ui_draw_button_help(NULL, "wake -");
     epaper_full_refresh();
 }
@@ -303,7 +296,15 @@ void ui_update_status_bar(bool wifi_connected, bool hermes_connected, uint8_t ba
 
 void ui_update_battery(uint8_t pct)
 {
+    if (pct > 100) pct = 100;
+    if (pct == battery) return;
     battery = pct;
+    epaper_clear_rect(DISPLAY_WIDTH - 45, 2, 44, 11);
+    draw_battery_icon(DISPLAY_WIDTH - 45, 3, battery);
+    char pct_str[8];
+    snprintf(pct_str, sizeof(pct_str), "%d%%", battery);
+    epaper_draw_text(DISPLAY_WIDTH - 22, 4, pct_str, 8);
+    epaper_partial_refresh();
 }
 
 void ui_update_wifi_status(bool connected)

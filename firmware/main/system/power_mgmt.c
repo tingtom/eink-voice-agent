@@ -13,7 +13,6 @@
 #include "nvs.h"
 #include "app_config.h"
 #include "epaper_driver.h"
-#include "mic_driver.h"
 #include "power_mgmt.h"
 #include "system_init.h"
 
@@ -138,7 +137,7 @@ void power_mark_activity(void)
 static void power_before_sleep(void)
 {
     epaper_sleep();
-    mic_stop();
+    board_power_audio_off();
 }
 
 void power_enter_deep_sleep(uint64_t wake_time_us)

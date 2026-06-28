@@ -23,6 +23,7 @@
 #include "audio_pipeline.h"
 #include "vad.h"
 #include "mic_driver.h"
+#include "es8311.h"
 #include "power_mgmt.h"
 #include "provisioning.h"
 #include "mode_voice_agent.h"
@@ -181,6 +182,21 @@ static void on_wake_failed(void)
 static void on_recording_ended(void)
 {
     // Already handled by mode stop functions
+}
+
+static void on_response(const char *text)
+{
+    if (strcmp(text, "Response timed out") == 0) {
+        audio_pipeline_stop_processing();
+        ui_show_error("Request timed out");
+        return;
+    }
+    switch (current_app_mode) {
+        case APP_MODE_VOICE_AGENT: mode_voice_agent_handle_response(text); break;
+        case APP_MODE_TRANSCRIBE:  mode_transcribe_handle_response(text);  break;
+        case APP_MODE_TODO:        mode_todo_handle_response(text);        break;
+        default: break;
+    }
 }
 
 static void enter_mode(app_mode_t mode)
@@ -355,6 +371,7 @@ static void draw_note_detail(int idx)
 // Long press  = confirm (BOOT) or back/sleep (PWR)
 static void handle_longpress(button_id_t btn)
 {
+    power_mark_activity();
     if (audio_pipeline_is_docked()) {
         ESP_LOGI(TAG, "Exiting docked mode via button press");
         audio_pipeline_set_docked(false);
@@ -453,6 +470,7 @@ static void handle_longpress(button_id_t btn)
 
 static void handle_button(button_id_t btn)
 {
+    power_mark_activity();
     if (audio_pipeline_is_docked()) {
         ESP_LOGI(TAG, "Exiting docked mode via button press");
         audio_pipeline_set_docked(false);
@@ -539,8 +557,9 @@ static void handle_button(button_id_t btn)
 static bool handle_vad_burst(void)
 {
     epaper_init();
-    mic_init();
-    mic_start();
+    i2c_bus_init();
+    board_power_audio_on();
+    es8311_init();
     vad_init();
 
     int16_t buf[VAD_BURST_SAMPLES];
@@ -555,7 +574,8 @@ static bool handle_vad_burst(void)
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    mic_stop();
+    es8311_deinit();
+    board_power_audio_off();
     return energy_ok >= 3;
 }
 
@@ -656,6 +676,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Stage 7 OK: WiFi creds loaded");
     bod_save_stage("wifi_start");
 
+    wifi_init();
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
+    ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
+
     // On battery: cap WiFi TX power to reduce peak-current brownout risk.
     // esp_wifi_set_max_tx_power value is in 0.25dBm units; default is ~78 (+19.5dBm).
     // Setting to 8 caps at +2dBm — sufficient to connect, cuts peak current significantly.
@@ -665,9 +689,6 @@ void app_main(void)
         esp_wifi_set_max_tx_power(8);
     }
 
-    wifi_init();
-    esp_log_level_set("wifi", ESP_LOG_ERROR);
-    ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
     wifi_connect(ssid, password);
     ESP_LOGI(TAG, "Stage 9: WiFi connecting (up to 30s)...");
 
@@ -700,6 +721,7 @@ void app_main(void)
         audio_pipeline_init();
         audio_pipeline_set_wake_failed_cb(on_wake_failed);
         audio_pipeline_set_recording_ended_cb(on_recording_ended);
+        audio_pipeline_set_response_cb(on_response);
         button_set_callback(handle_button);
         button_set_longpress_callback(handle_longpress, 1500);
         buttons_init();

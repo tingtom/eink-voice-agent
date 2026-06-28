@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -43,7 +44,9 @@ def _log_activity(entry: dict):
 
 def _save_telemetry(data: dict):
     TELEMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    data["last_seen"] = now
+    data.setdefault("updated_at", now)
     TELEMETRY_FILE.write_text(json.dumps(data, indent=2))
 
 
@@ -56,6 +59,43 @@ def _load_todos():
 def _save_todos(todos):
     TODOS_FILE.parent.mkdir(parents=True, exist_ok=True)
     TODOS_FILE.write_text(json.dumps(todos, indent=2))
+
+
+def _count_todos(todos):
+    total = len(todos)
+    done = sum(1 for t in todos if t.get("done"))
+    return total, done, total - done
+
+
+def _recent_notes(limit=10):
+    if not NOTES_DIR.exists():
+        return []
+    files = sorted(NOTES_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+    result = []
+    for f in files[:limit]:
+        if not f.is_file():
+            continue
+        preview = f.read_text().strip()[:120]
+        result.append({
+            "name": f.name,
+            "preview": preview,
+            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+            "size": f.stat().st_size,
+        })
+    return result
+
+
+def _recent_activity(limit=50):
+    if not ACTIVITY_LOG.exists():
+        return []
+    lines = ACTIVITY_LOG.read_text().strip().splitlines()
+    entries = []
+    for line in reversed(lines[-limit:]):
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
 
 
 def _transcribe_audio(audio_base64: str) -> str:
@@ -98,8 +138,10 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         self._host = os.getenv("EINK_DEVICE_HOST", "0.0.0.0")
         self._http_server = None
         self._audio_buffers: dict[str, list[str]] = {}
+        self._session_device_map: dict[str, str] = {}
         self._ws_by_chat: dict[str, object] = {}
         self._device_chat_map: dict[str, str] = {}
+        self._pending_responses: dict[str, str] = {}
         _ensure_dirs()
 
     async def connect(self) -> bool:
@@ -108,7 +150,21 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         try:
             from zeroconf import Zeroconf, ServiceInfo
             import socket
-            host_ip = socket.gethostbyname(socket.gethostname())
+            
+            # Get the LAN IP by connecting to a known address
+            host_ip = "0.0.0.0"
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                host_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                pass
+            
+            # Fallback to hostname resolution
+            if host_ip == "0.0.0.0" or host_ip.startswith("127."):
+                host_ip = socket.gethostbyname(socket.gethostname())
+            
             self._zeroconf = Zeroconf()
             self._service_info = ServiceInfo(
                 "_eink-voice-gateway._tcp.local.",
@@ -124,12 +180,50 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         except Exception as e:
             logger.warning("mDNS registration failed: %s", e)
 
-        app = web.Application()
+        # CORS middleware for device HTTP API
+        @web.middleware
+        async def cors_middleware(request, handler):
+            if request.method == "OPTIONS":
+                return web.Response(
+                    status=200,
+                    headers={
+                        "Access-Control-Allow-Origin": request.headers.get("Origin", "*"),
+                        "Access-Control-Allow-Credentials": "true",
+                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Device-ID",
+                        "Access-Control-Max-Age": "86400",
+                    }
+                )
+            origin = request.headers.get("Origin")
+            response = await handler(request)
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            else:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Device-ID"
+            return response
+
+        app = web.Application(middlewares=[cors_middleware])
         app.add_routes([
             web.post("/api/device/auth", self._handle_auth),
             web.post("/api/device/audio", self._handle_audio),
             web.post("/api/device/audio/end", self._handle_audio_end),
             web.post("/api/device/telemetry", self._handle_telemetry),
+            web.get("/api/device/response", self._handle_poll_response),
+            # Dashboard plugin API routes
+            web.get("/api/plugins/eink-voice-agent/status", self._handle_plugin_status),
+            web.get("/api/plugins/eink-voice-agent/todos", self._handle_plugin_todos),
+            web.post("/api/plugins/eink-voice-agent/todos", self._handle_plugin_todos_add),
+            web.post("/api/plugins/eink-voice-agent/todos/{todo_id}/toggle", self._handle_plugin_todo_toggle),
+            web.delete("/api/plugins/eink-voice-agent/todos/{todo_id}", self._handle_plugin_todo_delete),
+            web.get("/api/plugins/eink-voice-agent/notes", self._handle_plugin_notes),
+            web.get("/api/plugins/eink-voice-agent/notes/{filename}", self._handle_plugin_note_get),
+            web.delete("/api/plugins/eink-voice-agent/notes/{filename}", self._handle_plugin_note_delete),
+            web.get("/api/plugins/eink-voice-agent/activity", self._handle_plugin_activity),
+            web.get("/api/plugins/eink-voice-agent/telemetry", self._handle_plugin_telemetry),
+            web.get("/api/plugins/eink-voice-agent/transcript", self._handle_plugin_transcript),
         ])
         runner = web.AppRunner(app)
         await runner.setup()
@@ -179,20 +273,30 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         if session not in self._audio_buffers:
             self._audio_buffers[session] = []
         self._audio_buffers[session].append(chunk_b64)
+        # Track device_id per session for audio/end lookup
+        self._session_device_map[session] = device_id
         return web.json_response({"status": "ok"})
 
     async def _handle_audio_end(self, request):
         device_id = request.headers.get("X-Device-ID", "unknown")
         chat_id = self._device_chat_map.get(device_id)
-        if not chat_id:
-            return web.json_response({"error": "not authenticated"}, status=401)
 
         try:
             body = await request.json()
         except Exception:
             return web.json_response({"error": "invalid json"}, status=400)
 
-        session = body.get("session_id", chat_id)
+        session = body.get("session_id")
+        # If X-Device-ID didn't match, try resolving from session_id
+        if not chat_id and session and session in self._session_device_map:
+            device_id = self._session_device_map[session]
+            chat_id = self._device_chat_map.get(device_id)
+
+        if not chat_id:
+            return web.json_response({"error": "not authenticated"}, status=401)
+
+        if not session:
+            session = chat_id
         mode = body.get("mode", "agent")
         chunks = self._audio_buffers.pop(session, [])
         full_audio = "".join(chunks)
@@ -220,6 +324,14 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             logger.error("Telemetry error: %s", e)
             return web.json_response({"error": str(e)}, status=400)
 
+    async def _handle_poll_response(self, request):
+        chat_id = request.query.get("chat_id", "unknown")
+        content = self._pending_responses.pop(chat_id, None)
+        if content is None:
+            return web.json_response({"type": "no_response"})
+        content = content.replace("```", "`").replace("  ", " ")  # sanitize for device
+        return web.json_response({"type": "response", "data": content})
+
     async def _process_end(self, session, mode, full_audio, chat_id, device_id):
         if mode == "transcribe":
             text = _transcribe_audio(full_audio)
@@ -241,6 +353,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             source = self.build_source(
                 chat_id=chat_id, chat_name=f"Device-{device_id}",
                 chat_type="dm", user_id=device_id, user_name=device_id,
+                role_authorized=True,
             )
             event = MessageEvent(
                 text=text,
@@ -253,27 +366,151 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             return "Todo command processed"
 
         else:
+            # Write audio to a proper WAV file so the pipeline's media processing
+            # (_enrich_message_with_transcription / faster_whisper) can read it.
+            import tempfile
+            import base64
+            import wave
+            raw = base64.b64decode(full_audio)
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            with wave.open(tmp.name, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(raw)
+            tmp.close()
+
             source = self.build_source(
                 chat_id=chat_id, chat_name=f"Device-{device_id}",
                 chat_type="dm", user_id=device_id, user_name=device_id,
+                role_authorized=True,
             )
             event = MessageEvent(
                 text="[agent audio input]",
                 message_type=MessageType.TEXT,
                 source=source,
                 message_id=session,
-                extra_data={"audio_data": full_audio},
+                media_urls=[tmp.name],
+                media_types=["audio/wav"],
             )
             await self.handle_message(event)
             return "Audio received"
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
-        # For HTTP mode, we don't push to device.
-        # Device polls for messages or we return response inline.
+        self._pending_responses[chat_id] = content
+        _log_activity({
+            "type": "message", "direction": "out",
+            "content": content[:500],
+            "session_id": chat_id,
+        })
         return SendResult(success=True, message_id="")
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         return {"name": chat_id, "type": "dm"}
+
+    # ── Dashboard plugin API handlers ─────────────────────────────
+
+    async def _handle_plugin_status(self, request):
+        listening = self._http_server is not None
+        return web.json_response({
+            "port": self._port, "host": self._host, "listening": listening,
+        })
+
+    async def _handle_plugin_todos(self, request):
+        items = _load_todos()
+        total, done, pending = _count_todos(items)
+        return web.json_response({
+            "total": total, "done": done, "pending": pending, "items": items,
+        })
+
+    async def _handle_plugin_todos_add(self, request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+        items = _load_todos()
+        next_id = max((t["id"] for t in items), default=0) + 1
+        items.append({"id": next_id, "text": body.get("text", ""), "done": False})
+        _save_todos(items)
+        total, done, pending = _count_todos(items)
+        return web.json_response({
+            "total": total, "done": done, "pending": pending, "items": items,
+        })
+
+    async def _handle_plugin_todo_toggle(self, request):
+        try:
+            todo_id = int(request.match_info["todo_id"])
+        except (ValueError, KeyError):
+            return web.json_response({"error": "invalid todo id"}, status=400)
+        items = _load_todos()
+        for t in items:
+            if t["id"] == todo_id:
+                t["done"] = not t["done"]
+                _save_todos(items)
+                break
+        total, done, pending = _count_todos(items)
+        return web.json_response({
+            "total": total, "done": done, "pending": pending, "items": items,
+        })
+
+    async def _handle_plugin_todo_delete(self, request):
+        try:
+            todo_id = int(request.match_info["todo_id"])
+        except (ValueError, KeyError):
+            return web.json_response({"error": "invalid todo id"}, status=400)
+        items = [t for t in _load_todos() if t["id"] != todo_id]
+        _save_todos(items)
+        total, done, pending = _count_todos(items)
+        return web.json_response({
+            "total": total, "done": done, "pending": pending, "items": items,
+        })
+
+    async def _handle_plugin_notes(self, request):
+        return web.json_response(_recent_notes(limit=15))
+
+    async def _handle_plugin_note_get(self, request):
+        filename = Path(request.match_info["filename"]).name
+        path = NOTES_DIR / filename
+        if not path.exists() or not path.is_file():
+            return web.json_response({"error": "Note not found"}, status=404)
+        return web.json_response({"name": filename, "content": path.read_text()})
+
+    async def _handle_plugin_note_delete(self, request):
+        filename = Path(request.match_info["filename"]).name
+        path = NOTES_DIR / filename
+        if not path.exists() or not path.is_file():
+            return web.json_response({"error": "Note not found"}, status=404)
+        path.unlink()
+        return web.json_response({"ok": True})
+
+    async def _handle_plugin_activity(self, request):
+        return web.json_response(_recent_activity(limit=50))
+
+    async def _handle_plugin_telemetry(self, request):
+        if not TELEMETRY_FILE.exists():
+            return web.json_response({"available": False})
+        try:
+            data = json.loads(TELEMETRY_FILE.read_text())
+            if data.get("storage_free_kb") is not None:
+                data["recording_time_remaining_sec"] = int(data["storage_free_kb"] / 32)
+            return web.json_response({"available": True, "data": data})
+        except Exception:
+            return web.json_response({"available": False})
+
+    async def _handle_plugin_transcript(self, request):
+        limit = int(request.query.get("limit", "30"))
+        entries = _recent_activity(limit=100)
+        messages = [
+            {
+                "ts": e["ts"],
+                "direction": e["direction"],
+                "content": e.get("content", ""),
+                "session_id": e.get("session_id"),
+            }
+            for e in entries
+            if e.get("type") == "message" and e.get("direction")
+        ]
+        return web.json_response(messages[-limit:])
 
 
 # ── Todo tools ─────────────────────────────────────────────────

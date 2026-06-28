@@ -274,6 +274,20 @@
                 "\u2248 " + fmtDurShort(recSec) + " of recording"
               )
             : h("div", { className: "eink-tele-sub" }, "free space")
+        ),
+        // Last seen
+        h("div", { className: "eink-tele-metric" },
+          h("div", { className: "eink-tele-metric-hd" },
+            h("span", { className: "eink-tele-icon" },
+              h("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 },
+                h("circle", { cx: 12, cy: 12, r: 10 }),
+                h("polyline", { points: "12 6 12 12 16 14" })
+              )
+            ),
+            h("span", {}, "Last seen")
+          ),
+          h("div", { className: "eink-tele-val" }, data.last_seen ? timeAgo(data.last_seen) : "—"),
+          h("div", { className: "eink-tele-sub" }, data.last_seen ? ts(data.last_seen) : "")
         )
       )
     );

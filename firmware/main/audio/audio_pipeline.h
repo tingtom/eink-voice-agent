@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
-#include "driver/i2s_std.h"
 #include "recordings.h"
 
 typedef enum {
@@ -23,8 +22,6 @@ void audio_pipeline_play_tts(const uint8_t *audio, size_t len);
 audio_mode_t audio_pipeline_get_current_mode(void);
 bool audio_pipeline_is_recording(void);
 
-i2s_chan_handle_t audio_get_tx_handle(void);
-
 // Offline recording — writes audio to SD card
 bool audio_pipeline_start_offline_recording(rec_type_t type);
 void audio_pipeline_stop_offline_recording(void);
@@ -39,6 +36,8 @@ void audio_pipeline_set_playback_active(bool active);
 
 // UI state callbacks
 typedef void (*audio_ui_cb_t)(void);
+typedef void (*response_cb_t)(const char *text);
 void audio_pipeline_set_wake_failed_cb(audio_ui_cb_t cb);
 void audio_pipeline_set_wake_detected_cb(audio_ui_cb_t cb);
 void audio_pipeline_set_recording_ended_cb(audio_ui_cb_t cb);
+void audio_pipeline_set_response_cb(response_cb_t cb);

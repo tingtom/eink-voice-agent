@@ -139,10 +139,12 @@ void *get_i2c_bus_handle(void)
     return (void *)i2c_bus;
 }
 
-void system_init(void)
+void i2c_bus_init(void)
 {
-    ESP_LOGI(TAG, "Initializing system...");
-
+    if (i2c_bus) {
+        ESP_LOGD(TAG, "I2C bus already initialized");
+        return;
+    }
     i2c_master_bus_config_t i2c_bus_cfg = {
         .i2c_port = I2C_PORT,
         .sda_io_num = I2C_SDA_GPIO,
@@ -151,8 +153,18 @@ void system_init(void)
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus));
+    esp_err_t ret = i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C bus init failed: %s", esp_err_to_name(ret));
+        return;
+    }
     ESP_LOGI(TAG, "I2C bus initialized (SDA=%d SCL=%d)", I2C_SDA_GPIO, I2C_SCL_GPIO);
+}
+
+void system_init(void)
+{
+    ESP_LOGI(TAG, "Initializing system...");
+    i2c_bus_init();
 
     ESP_LOGI(TAG, "Scanning I2C bus for PCA9554A/TCA9554...");
     if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {

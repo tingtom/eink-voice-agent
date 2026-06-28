@@ -65,7 +65,7 @@ esp_err_t http_get_json(const char *url, char *response, size_t response_len)
     http_resp_t resp_ctx = {.buf = response, .len = response_len};
     esp_http_client_config_t cfg = {
         .url = url,
-        .method = HTTP_METHOD_POST,
+        .method = HTTP_METHOD_GET,
         .event_handler = http_event_handler,
         .user_data = &resp_ctx,
         .timeout_ms = 5000,
