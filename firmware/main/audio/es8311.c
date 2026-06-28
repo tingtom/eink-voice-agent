@@ -26,8 +26,8 @@ static esp_err_t es8311_i2s_init(void)
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 4,
-        .dma_frame_num = 64,
+        .dma_desc_num = 2,
+        .dma_frame_num = 128,
         .auto_clear = true,
     };
 

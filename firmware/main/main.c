@@ -702,10 +702,9 @@ void app_main(void)
         ESP_LOGI(TAG, "Stage 10 OK: WiFi connected (%s)", wifi_get_ip());
         bod_save_stage("wifi_connected");
 
-        // Init I2C + I2S (audio hardware) before Hermes auth to ensure DMA
-        // buffers are allocated before the TLS handshake fragments the heap.
+        // Init audio hardware before Hermes auth so I2S DMA buffers are
+        // allocated before the TLS handshake can fragment the heap.
         i2c_bus_init();
-        board_power_audio_on();
         es8311_init();
 
         ESP_LOGI(TAG, "Stage 11: Authenticating with Hermes server...");
