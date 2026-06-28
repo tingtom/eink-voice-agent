@@ -736,13 +736,15 @@ void app_main(void)
     // Audio + buttons init runs regardless of WiFi status.
     ESP_LOGI(TAG, "Stage 12: Finalizing audio + buttons...");
     recordings_init_audio();
+    // Buttons must be created BEFORE audio_pipeline_init() which allocates the
+    // 162KB TFLite arena and exhausts the heap, leaving no room for task stacks.
+    button_set_callback(handle_button);
+    button_set_longpress_callback(handle_longpress, 1500);
+    buttons_init();
     audio_pipeline_init();
     audio_pipeline_set_wake_failed_cb(on_wake_failed);
     audio_pipeline_set_recording_ended_cb(on_recording_ended);
     audio_pipeline_set_response_cb(on_response);
-    button_set_callback(handle_button);
-    button_set_longpress_callback(handle_longpress, 1500);
-    buttons_init();
     ESP_LOGI(TAG, "Stage 13 OK: Audio, buttons ready");
     bod_save_stage("ready_for_home");
 

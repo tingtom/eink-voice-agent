@@ -82,7 +82,7 @@ void buttons_init(void)
         };
         gpio_config(&io);
     }
-    xTaskCreate(buttons_scan_task, "buttons", 8192, NULL, 10, NULL);
+    xTaskCreate(buttons_scan_task, "buttons", 4096, NULL, 10, NULL);
     ESP_LOGI(TAG, "Buttons initialized");
 }
 
