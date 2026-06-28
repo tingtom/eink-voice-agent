@@ -734,8 +734,7 @@ void app_main(void)
         bod_save_stage("ready_for_home");
     } else {
         ESP_LOGW(TAG, "Stage 10: WiFi not connected, starting provisioning");
-        wifi_disconnect();
-        ESP_ERROR_CHECK(esp_wifi_stop());
+        esp_wifi_stop();
         provisioning_start_ap();
         provisioning_start_server();
         ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
