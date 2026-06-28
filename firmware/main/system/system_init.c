@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_check.h"
 #include "driver/gpio.h"
@@ -110,6 +112,53 @@ static void tca9554_write_output(uint8_t val)
 }
 
 /* ------------------------------------------------------------------ */
+/* Optional: Enable MICBIAS on ES8311 (I2C address 0x18)              */
+static void es8311_enable_micbias(void)
+{
+    /* Wait a bit for the codec to power up after enabling AUDIO_PWR */
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    const uint8_t ES8311_ADDR = 0x18;
+    const uint8_t REG_POWER_MGMT = 0x02; /* Assuming Power Management register */
+    i2c_master_dev_handle_t es8311_dev = NULL;
+    esp_err_t ret;
+
+    /* Add temporary device handle for ES8311 */
+    i2c_device_config_t es8311_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = ES8311_ADDR,
+        .scl_speed_hz = 400000,
+    };
+    esp_err_t add_ret = i2c_master_bus_add_device(i2c_bus, &es8311_cfg, &es8311_dev);
+    if (add_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add ES8311 device: %s", esp_err_to_name(add_ret));
+        return;
+    }
+
+    /* Read current value of Power Management register */
+    uint8_t reg = REG_POWER_MGMT;
+    uint8_t val = 0;
+    ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", REG_POWER_MGMT, esp_err_to_name(ret));
+        goto cleanup;
+    }
+    /* Set MICBIAS enable bit (assuming bit0) */
+    val |= 0x01;
+    /* Write back */
+    uint8_t tx[2] = { REG_POWER_MGMT, val };
+    ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", REG_POWER_MGMT, esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "ES8311 MICBIAS enabled");
+    }
+
+cleanup:
+    i2c_master_bus_rm_device(es8311_dev);
+}
+
+/* ------------------------------------------------------------------ */
 /* I2C bus initialisation                                             */
 void i2c_bus_init(void)
 {
@@ -170,9 +219,8 @@ void system_init(void)
 
     if (i2c_probe(i2c_bus, PCA9555_ADDR)) {
         expander_addr = PCA9555_ADDR;
-        /* Tentatively assume it's NOT a PCA9555 (we treat as 8-bit expander)
-         * unless we can verify otherwise later. For now, all known boards
-         * use a TCA9554/PCA9554A-compatible device at 0x20. */
+        /* We treat the device as an 8‑bit expander unless we can prove otherwise.
+         * All known Waveshare boards use a TCA9554/PCA9554A‑compatible device at 0x20. */
         is_pca9555_detected = false;
         ESP_LOGI(TAG, "Found I/O expander at 0x%02X", expander_addr);
     } else if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
@@ -215,8 +263,8 @@ void system_init(void)
 
     /* --------------------------------------------------------------
      * Configure the I/O expander:
-     *   - Make EPD_PWR(0), AUDIO_PWR(1), AMP_ENABLE(3), LED(4),
-     *     VBAT_PWR(5) outputs (0 = output, 1 = input)
+     *   - Set pins EPD_PWR(0), AUDIO_PWR(1), AMP_ENABLE(3), LED(4),
+     *     VBAT_PWR(5) as outputs (0 = output, 1 = input)
      *   - All other pins stay as inputs (default 1)
      *   - Start with all outputs low
      * -------------------------------------------------------------- */
@@ -226,11 +274,13 @@ void system_init(void)
     config_val &= ~(1 << EXIO_AMP_ENABLE);
     config_val &= ~(1 << EXIO_LED);
     config_val &= ~(1 << EXIO_VBAT_PWR);
+    /* Write configuration register */
     tca9554_write_reg(get_config_reg(), config_val);
     ESP_LOGI(TAG,
              "I/O expander config set to 0x%02X (outputs: EPD_PWR, AUDIO_PWR, AMP_ENABLE, LED, VBAT_PWR)",
              config_val);
 
+    /* Start with all outputs low */
     tca9554_write_reg(get_output_reg(), 0);
     ESP_LOGI(TAG, "I/O expander outputs initialized to 0x00");
 
@@ -239,6 +289,8 @@ void system_init(void)
     gpio_set_level(EXIO_EPD_PWR, 1);
     ESP_LOGI(TAG, "Turning on audio power");
     gpio_set_level(EXIO_AUDIO_PWR, 1);
+    /* Enable MICBIAS on ES8311 after powering the audio block */
+    es8311_enable_micbias();
     ESP_LOGI(TAG, "Turning on VBAT power");
     gpio_set_level(EXIO_VBAT_PWR, 1);
 }
