@@ -90,12 +90,7 @@ void board_power_epd_on(void)
 void board_power_audio_on(void)
 {
     if (!tca9554_present) {
-        gpio_set_direction(EXIO_AUDIO_PWR, GPIO_MODE_OUTPUT);
-        gpio_set_level(EXIO_AUDIO_PWR, 1);
-
-        gpio_set_direction(EXIO_AMP_ENABLE, GPIO_MODE_OUTPUT);
-        gpio_set_level(EXIO_AMP_ENABLE, 1);
-        ESP_LOGI(TAG, "Audio power ON (direct GPIO, no TCA9554)");
+        ESP_LOGW(TAG, "No TCA9554 — audio power control unavailable, assuming always-on");
         return;
     }
     // Read-modify-write to avoid clobbering other bits (EPD_PWR, VBAT_PWR, LED).
