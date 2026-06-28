@@ -31,18 +31,10 @@ static bool longpress_fired[BUTTON_COUNT] = {false};
 static void buttons_scan_task(void *arg)
 {
     (void)arg;
+    ESP_LOGW(TAG, "Button task RUNNING");
     TickType_t last_wake = xTaskGetTickCount();
-    int loop = 0;
 
     while (1) {
-        loop++;
-        // Log raw GPIO levels on first scan and every ~100 iterations (~3s)
-        if (loop == 1 || loop % 100 == 0) {
-            int l0 = button_gpios[0] >= 0 ? gpio_get_level(button_gpios[0]) : -1;
-            int l1 = button_gpios[1] >= 0 ? gpio_get_level(button_gpios[1]) : -1;
-            ESP_LOGI(TAG, "heartbeat loop=%d gpio[0]=%d gpio[1]=%d", loop, l0, l1);
-        }
-
         for (int i = 0; i < BUTTON_COUNT; i++) {
             if (button_gpios[i] < 0) continue;
 
