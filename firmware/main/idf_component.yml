@@ -1,6 +1,5 @@
 dependencies:
   tuanpmt/esp_epaper: "^1.0.4"
-  espressif/esp_websocket_client: "^1.0.0"
   espressif/mdns: "^1.5.3"
   espressif/esp-tflite-micro: "^1.3.7"
   espressif/esp-nn: "^1.2.3"

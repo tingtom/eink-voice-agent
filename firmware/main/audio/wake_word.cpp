@@ -254,3 +254,9 @@ extern "C" void wake_word_set_sensitivity(float sens)
     sensitivity = sens;
     ESP_LOGI(TAG, "Sensitivity set to %.1f", sensitivity);
 }
+
+extern "C" void wake_word_reset(void)
+{
+    audio_count = 0;
+    ESP_LOGD(TAG, "Wake word buffer reset");
+}

@@ -76,7 +76,7 @@ void buttons_init(void)
         gpio_set_direction(button_gpios[i], GPIO_MODE_INPUT);
         gpio_set_pull_mode(button_gpios[i], GPIO_PULLUP_ONLY);
     }
-    xTaskCreate(buttons_scan_task, "buttons", 2048, NULL, 10, NULL);
+    xTaskCreate(buttons_scan_task, "buttons", 4096, NULL, 10, NULL);
     ESP_LOGI(TAG, "Buttons initialized");
 }
 

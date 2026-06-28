@@ -1,5 +1,7 @@
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include "http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/i2s_std.h"
@@ -11,7 +13,6 @@
 #include "speaker_driver.h"
 #include "wake_word.h"
 #include "vad.h"
-#include "ws_client.h"
 #include "power_mgmt.h"
 #include "ringbuffer.h"
 #include "audio_pipeline.h"
@@ -19,18 +20,23 @@
 #include "ui_manager.h"
 #include "es8311.h"
 #include "esp_heap_caps.h"
+#include "system_init.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 
 static ringbuffer_t audio_rb;
+static i2s_chan_handle_t g_tx_handle = NULL;
 static bool recording = false;
 static bool processing = false;
+static bool playback_active = false;
 static audio_mode_t current_mode = MODE_AGENT;
 static bool offline_recording = false;
 static bool pipeline_docked = false;
 static bool wake_word_checking = false;
 
 static audio_ui_cb_t wake_failed_cb = NULL;
+static audio_ui_cb_t wake_detected_cb = NULL;
 static audio_ui_cb_t recording_ended_cb = NULL;
 
 static EventGroupHandle_t audio_events;
@@ -41,10 +47,13 @@ static EventGroupHandle_t audio_events;
 #define VAD_BURST_MS        50
 #define VAD_BURST_SAMPLES   ((AUDIO_SAMPLE_RATE * VAD_BURST_MS) / 1000)
 #define VAD_CONFIRM_FRAMES  2
+#define WS_SEND_CHUNK_SAMPLES (VAD_BURST_SAMPLES)
 
 #define UI_UPDATE_INTERVAL_US  (300 * 1000)
 
 static uint32_t send_packets = 0;
+static uint32_t send_failures = 0;
+static uint32_t rb_empty_count = 0;
 
 static void audio_capture_task(void *arg)
 {
@@ -52,66 +61,114 @@ static void audio_capture_task(void *arg)
     int16_t buf[VAD_BURST_SAMPLES];
     int64_t last_ui = 0;
     uint32_t iter = 0;
+    int64_t last_iter_time = 0;
 
     while (1) {
-        if (recording) {
-            size_t read = 0;
-            esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
-            iter++;
-            if (iter % 100 == 0) {
-                ESP_LOGI(TAG, "capture iter=%lu heap=%u",
-                         (unsigned long)iter,
-                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-            }
-            if (ret == ESP_OK && read > 0) {
-                if (offline_recording) {
-                    recording_write_audio(buf, read);
-                } else {
-                    if (ringbuffer_available(&audio_rb) + read <= audio_rb.size) {
-                        ringbuffer_write(&audio_rb, buf, read);
-                    }
-                    if (ws_client_needs_reset()) {
-                        // Skip WS send; main loop is recreating the client after
-                        // a stale transport. This prevents the ~4.7 KB heap leak
-                        // per failed send_text() inside the esp-websocket lib.
-                    } else {
-                        bool connected = ws_client_is_connected();
-                        uint32_t free_before = (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-                        esp_err_t sret = ws_client_send_audio_mode(
-                            (uint8_t *)buf, read * sizeof(int16_t),
-                            current_mode == MODE_AGENT ? "agent" :
-                            current_mode == MODE_NOTE ? "note" :
-                            current_mode == MODE_TRANSCRIBE ? "transcribe" : "todo");
-                        uint32_t free_after = (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-                        if (sret != ESP_OK) {
-                            UBaseType_t pri = uxTaskPriorityGet(NULL);
-                            ESP_LOGE(TAG, "send failed: ret=%s len=%u connected=%d heap_before=%u heap_after=%u task_pri=%u",
-                                     esp_err_to_name(sret), (unsigned)(read * sizeof(int16_t)),
-                                     connected, free_before, free_after, (unsigned)pri);
-                        } else {
-                            send_packets++;
-                        }
-                    }
-                }
-
-                int64_t now = esp_timer_get_time();
-                if (now - last_ui > UI_UPDATE_INTERVAL_US) {
-                    last_ui = now;
-                    int32_t energy = 0;
-                    for (size_t i = 0; i < read; i++) energy += abs(buf[i]);
-                    energy /= (int32_t)read;
-                    ui_update_recording_viz(energy);
-                }
-            } else if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "mic_read failed: %s", esp_err_to_name(ret));
-            } else {
-                ESP_LOGW(TAG, "mic_read returned 0 (iter=%lu)", (unsigned long)iter);
-            }
-        } else {
-            iter = 0;
-            send_packets = 0;
+        if (pipeline_docked || wake_word_checking || processing) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
         }
+
+        if (!recording) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        size_t read = 0;
+        esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
+        int64_t now = esp_timer_get_time();
+        int32_t delta_us = (int32_t)(now - last_iter_time);
+        last_iter_time = now;
+        iter++;
+        if (iter % 10 == 0) {
+            ESP_LOGI(TAG, "capture iter=%lu read=%u ret=%s delta_us=%ld heap=%u",
+                     (unsigned long)iter, (unsigned)read,
+                     ret == ESP_OK ? "OK" : ret == ESP_ERR_TIMEOUT ? "TIMEOUT" : "OTHER",
+                     (long)delta_us, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        }
+
+        if (ret == ESP_OK && read > 0) {
+            if (offline_recording) {
+                recording_write_audio(buf, read);
+            } else {
+                if (!ringbuffer_write(&audio_rb, buf, read)) {
+                    ESP_LOGW(TAG, "ringbuffer full, dropped %u samples (avail=%u)",
+                             (unsigned)read, (unsigned)ringbuffer_available(&audio_rb));
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                }
+            }
+        } else if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "mic_read failed: %s", esp_err_to_name(ret));
+        } else {
+            ESP_LOGW(TAG, "mic_read returned 0 (iter=%lu)", (unsigned long)iter);
+        }
+
+        if (!offline_recording) {
+            now = esp_timer_get_time();
+            if (now - last_ui > UI_UPDATE_INTERVAL_US) {
+                last_ui = now;
+                int32_t energy = 0;
+                for (size_t i = 0; i < read; i++) energy += abs(buf[i]);
+                energy /= (int32_t)read;
+                ui_update_recording_viz(energy);
+            }
+        }
+
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+static void http_send_task(void *arg)
+{
+    (void)arg;
+    int16_t send_buf[WS_SEND_CHUNK_SAMPLES];
+    const size_t chunk_samples = sizeof(send_buf) / sizeof(send_buf[0]);
+
+    while (1) {
+        if (!recording || pipeline_docked || !wifi_is_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        bool success = ringbuffer_read(&audio_rb, send_buf, chunk_samples);
+        if (!success) {
+            rb_empty_count++;
+            if (rb_empty_count % 100 == 0) {
+                ESP_LOGW(TAG, "http_send: ringbuffer empty (count=%u, failures=%u, sent=%u)",
+                         (unsigned)ringbuffer_available(&audio_rb), (unsigned)rb_empty_count, (unsigned)send_packets);
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        char url[256];
+        snprintf(url, sizeof(url), "%s/api/device/audio?mode=%s",
+                 HERMES_HTTP_URL,
+                 current_mode == MODE_AGENT ? "agent" :
+                 current_mode == MODE_NOTE ? "note" :
+                 current_mode == MODE_TRANSCRIBE ? "transcribe" : "todo");
+
+        char resp[64];
+        bool posted = false;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (!wifi_is_connected()) {
+                ESP_LOGW(TAG, "http_audio: WiFi disconnected, attempt %d/3", attempt + 1);
+                vTaskDelay(pdMS_TO_TICKS(500 * (attempt + 1)));
+                continue;
+            }
+            esp_err_t ret = http_post_binary(url, (const uint8_t *)send_buf, chunk_samples * sizeof(int16_t), resp, sizeof(resp));
+            if (ret == ESP_OK) {
+                posted = true;
+                send_packets++;
+                break;
+            }
+            ESP_LOGW(TAG, "http_audio: POST attempt %d/3 failed: %s", attempt + 1, esp_err_to_name(ret));
+            vTaskDelay(pdMS_TO_TICKS(200 * (attempt + 1)));
+        }
+        if (!posted) {
+            send_failures++;
+            ESP_LOGE(TAG, "http_audio: all retries failed for %s len=%u", url, (unsigned)(chunk_samples * sizeof(int16_t)));
+        }
     }
 }
 
@@ -140,7 +197,7 @@ static void vad_task(void *arg)
     bool in_vad_trigger = false;
 
     while (1) {
-        if (recording || pipeline_docked || wake_word_checking) {
+        if (recording || pipeline_docked || wake_word_checking || processing || playback_active) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
@@ -172,8 +229,6 @@ static void vad_task(void *arg)
         } else {
             confirm_count = 0;
             if (in_vad_trigger) {
-                int64_t elapsed = 0;
-                (void)elapsed;
                 in_vad_trigger = false;
             }
         }
@@ -190,7 +245,7 @@ static void wake_word_task(void *arg)
     int wake_word_checks = 0;
 
     while (1) {
-        if (pipeline_docked) {
+        if (pipeline_docked || recording || processing || playback_active) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -201,20 +256,26 @@ static void wake_word_task(void *arg)
         if (bits & AUDIO_EVENT_VAD_TRIGGERED) {
             ESP_LOGI(TAG, "Wake word checking started (VAD triggered)");
             wake_word_checking = true;
+            wake_word_reset();
             wake_word_checks = 0;
 
             while (wake_word_checks < AUDIO_MAX_WAKE_WORD_CHECKS) {
+                if (recording || playback_active) break;
                 size_t read = 0;
                 esp_err_t ret = mic_read(buf, VAD_BURST_SAMPLES, &read);
-
-                if (!recording && ret == ESP_OK && read > 0) {
+                if (ret == ESP_OK && read > 0) {
                     if (wake_word_detect(buf, read)) {
                         ESP_LOGI(TAG, "Wake word detected!");
                         xEventGroupSetBits(audio_events, AUDIO_EVENT_WAKE_WORD);
                         audio_pipeline_start_recording(MODE_AGENT);
+                        if (wake_detected_cb) wake_detected_cb();
                         break;
                     }
                     wake_word_checks++;
+                } else if (ret != ESP_OK) {
+                    ESP_LOGE(TAG, "wake_word mic_read failed: %s", esp_err_to_name(ret));
+                } else {
+                    ESP_LOGD(TAG, "wake_word mic_read returned 0");
                 }
                 vTaskDelay(pdMS_TO_TICKS(VAD_BURST_MS / 2));
             }
@@ -228,13 +289,13 @@ static void wake_word_task(void *arg)
     }
 }
 
-static void audio_i2s_duplex_init(void)
+static void audio_i2s_duplex_init(i2s_chan_handle_t *out_tx)
 {
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 4,
-        .dma_frame_num = 512,
+        .dma_desc_num = 2,
+        .dma_frame_num = 128,
         .auto_clear = true,
     };
 
@@ -248,10 +309,10 @@ static void audio_i2s_duplex_init(void)
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
         },
         .slot_cfg = {
-            .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = I2S_STD_SLOT_LEFT,
-            .ws_width = 16,
-            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
+            .slot_mode = I2S_SLOT_MODE_STEREO,
+            .slot_mask = I2S_STD_SLOT_BOTH,
+            .ws_width = 32,
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
             .bit_shift = true,
         },
         .gpio_cfg = {
@@ -270,26 +331,41 @@ static void audio_i2s_duplex_init(void)
 
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx, &std_cfg));
-    speaker_set_handle(tx);
+    ESP_ERROR_CHECK(i2s_channel_enable(tx));
+
+    g_tx_handle = tx;
+    *out_tx = tx;
+
+    speaker_init();
     mic_set_handle(rx);
 
-    ESP_LOGI(TAG, "I2S duplex initialized (%d Hz, mono)", AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "I2S duplex initialized (%d Hz, stereo)", AUDIO_SAMPLE_RATE);
+}
+
+i2s_chan_handle_t audio_get_tx_handle(void)
+{
+    return g_tx_handle;
 }
 
 void audio_pipeline_init(void)
 {
-    ringbuffer_init(&audio_rb, AUDIO_BUFFER_SIZE * 4);
-    audio_i2s_duplex_init();
-    ESP_ERROR_CHECK(speaker_enable());       // start TX clock (MCLK) before ES8311 init
-    ESP_ERROR_CHECK(es8311_init());
+    ringbuffer_init(&audio_rb, AUDIO_BUFFER_SIZE);
+    i2s_chan_handle_t tx = NULL;
+    audio_i2s_duplex_init(&tx);
+    esp_err_t ret = es8311_init(tx);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ES8311 init failed: %s", esp_err_to_name(ret));
+    }
+    board_power_audio_on();
     wake_word_init();
     vad_init();
 
     audio_events = xEventGroupCreate();
 
     xTaskCreate(audio_capture_task, "audio_capture", 4096, NULL, 5, NULL);
+    xTaskCreate(http_send_task, "http_send", 8192, NULL, 3, NULL);
     xTaskCreate(anim_task, "anim", 2048, NULL, 3, NULL);
-    xTaskCreate(vad_task, "vad", 3072, NULL, 4, NULL);
+    xTaskCreate(vad_task, "vad", 4096, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
     mic_start();
     ESP_LOGI(TAG, "Audio pipeline initialized (two-stage VAD + wake word)");
@@ -302,6 +378,8 @@ void audio_pipeline_start_recording(audio_mode_t mode)
     recording = true;
     processing = false;
     power_mark_activity();
+    wake_word_checking = false;
+    ringbuffer_clear(&audio_rb);
     const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
     ESP_LOGI(TAG, "Recording started (mode=%s)", mode_str[mode]);
 }
@@ -328,12 +406,18 @@ void audio_pipeline_stop_processing(void)
 void audio_pipeline_send_end_recording(void)
 {
     const char *mode_str[] = {"agent", "note", "transcribe", "todo"};
-    char msg[128];
-    snprintf(msg, sizeof(msg),
-             "{\"type\":\"end\",\"mode\":\"%s\",\"session_id\":\"\"}",
-             mode_str[current_mode]);
-    ws_client_send_json(msg);
-    ESP_LOGI(TAG, "End of recording sent (mode=%s)", mode_str[current_mode]);
+    char url[256];
+    snprintf(url, sizeof(url), "%s/api/device/audio/end", HERMES_HTTP_URL);
+
+    char json[128];
+    snprintf(json, sizeof(json), "{\"mode\":\"%s\"}", mode_str[current_mode]);
+    char resp[64];
+    esp_err_t ret = http_post_json(url, json, resp, sizeof(resp));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "http_audio: end POST failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "End of recording sent (mode=%s)", mode_str[current_mode]);
+    }
 }
 
 audio_mode_t audio_pipeline_get_current_mode(void)
@@ -361,7 +445,9 @@ bool audio_pipeline_start_offline_recording(rec_type_t type)
     processing = false;
     power_mark_activity();
     ESP_LOGI(TAG, "Offline recording started (type=%s)",
-             type == REC_TYPE_NOTE ? "NOTE" : "TODO");
+             type == REC_TYPE_NOTE ? "NOTE" :
+             type == REC_TYPE_TODO ? "TODO" :
+             type == REC_TYPE_AGENT ? "AGENT" : "TRANSCRIBE");
     return true;
 }
 
@@ -390,9 +476,19 @@ bool audio_pipeline_is_docked(void)
     return pipeline_docked;
 }
 
+void audio_pipeline_set_playback_active(bool active)
+{
+    playback_active = active;
+}
+
 void audio_pipeline_set_wake_failed_cb(audio_ui_cb_t cb)
 {
     wake_failed_cb = cb;
+}
+
+void audio_pipeline_set_wake_detected_cb(audio_ui_cb_t cb)
+{
+    wake_detected_cb = cb;
 }
 
 void audio_pipeline_set_recording_ended_cb(audio_ui_cb_t cb)

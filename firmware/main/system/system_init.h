@@ -4,3 +4,6 @@
 void system_init(void);
 void *get_i2c_bus_handle(void);
 uint8_t tca9554_read_input(void);
+void board_power_audio_on(void);
+void board_power_audio_off(void);
+bool system_tca9554_present(void);

@@ -16,7 +16,6 @@ idf_component_register(
         "input/buttons.c"
         "network/provisioning.c"
         "network/wifi_manager.c"
-        "network/ws_client.c"
         "network/http_client.c"
         "modes/mode_voice_agent.c"
         "modes/mode_note.c"
@@ -44,7 +43,6 @@ idf_component_register(
         esp_wifi
         esp_http_client
         esp_http_server
-        esp_websocket_client
         esp_adc
         spi_flash
         nvs_flash

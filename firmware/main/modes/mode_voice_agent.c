@@ -4,26 +4,41 @@
 #include "esp_log.h"
 #include "audio_pipeline.h"
 #include "ui_manager.h"
-#include "ws_client.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "MODE_AGENT";
 static bool active = false;
+static bool is_offline = false;
 
 void mode_voice_agent_start(void)
 {
     ESP_LOGI(TAG, "Voice agent mode started");
     active = true;
     ui_show_recording_screen();
-    audio_pipeline_start_recording(MODE_AGENT);
+
+    if (wifi_is_connected()) {
+        is_offline = false;
+        audio_pipeline_start_recording(MODE_AGENT);
+    } else {
+        is_offline = true;
+        audio_pipeline_start_offline_recording(REC_TYPE_AGENT);
+    }
 }
 
 void mode_voice_agent_stop(void)
 {
     ESP_LOGI(TAG, "Voice agent mode stopped");
-    audio_pipeline_stop_recording();
-    audio_pipeline_send_end_recording();
-    ui_show_processing_screen();
-    audio_pipeline_start_processing();
+
+    if (is_offline) {
+        audio_pipeline_stop_offline_recording();
+        ui_show_response("Offline recording saved");
+        ui_show_home_screen();
+    } else {
+        audio_pipeline_stop_recording();
+        audio_pipeline_send_end_recording();
+        ui_show_processing_screen();
+        audio_pipeline_start_processing();
+    }
 }
 
 void mode_voice_agent_finish(void)

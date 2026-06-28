@@ -11,9 +11,12 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
+#include "app_config.h"
+#include "app_config.h"
 #include "sdcard.h"
 #include "speaker_driver.h"
-#include "ws_client.h"
+#include "http_client.h"
+#include "wifi_manager.h"
 #include "recordings.h"
 
 static const char *TAG = "RECORDINGS";
@@ -32,6 +35,8 @@ static char rec_name[REC_NAME_LEN];
 static bool recording = false;
 static rec_type_t rec_type;
 static uint32_t rec_start_us;
+static size_t rec_bytes_written = 0;
+static uint32_t rec_writes = 0;
 
 // ── Sync state ─────────────────────────────────────
 static bool sync_busy = false;
@@ -201,6 +206,18 @@ bool recordings_init(void)
     return true;
 }
 
+void recordings_init_audio(void)
+{
+    rec_bytes_written = 0;
+    rec_writes = 0;
+    if (rec_file) {
+        fclose(rec_file);
+        rec_file = NULL;
+    }
+    recording = false;
+    ESP_LOGI(TAG, "Audio recording state initialized");
+}
+
 // ── Recording ───────────────────────────────────────
 
 bool recording_start(rec_type_t type)
@@ -208,11 +225,9 @@ bool recording_start(rec_type_t type)
     if (recording) return false;
     if (!sdcard_is_mounted()) {
         ESP_LOGW(TAG, "SD not mounted, cannot record");
-        // Fallback: try to mount
         if (!sdcard_mount()) return false;
     }
 
-    // Get next ID
     uint32_t id = read_counter() + 1;
     write_counter(id);
 
@@ -229,15 +244,27 @@ bool recording_start(rec_type_t type)
 
     recording = true;
     rec_start_us = (uint32_t)(esp_timer_get_time());
-    ESP_LOGI(TAG, "Recording %s (type=%s) to %s",
-             rec_name, type == REC_TYPE_NOTE ? "NOTE" : "TODO", path);
+    rec_bytes_written = 0;
+    rec_writes = 0;
+    ESP_LOGI(TAG, "Recording %s (type=%d) to %s",
+             rec_name, (int)rec_type, path);
     return true;
 }
 
 void recording_write_audio(const int16_t *data, size_t samples)
 {
     if (!recording || !rec_file) return;
-    fwrite(data, sizeof(int16_t), samples, rec_file);
+    size_t written = fwrite(data, sizeof(int16_t), samples, rec_file);
+    rec_writes++;
+    rec_bytes_written += written * sizeof(int16_t);
+    if (written != samples) {
+        ESP_LOGE(TAG, "write short: samples=%u written=%u total_writes=%u total_bytes=%u",
+                 (unsigned)samples, (unsigned)written, (unsigned)rec_writes, (unsigned)rec_bytes_written);
+    }
+    if (rec_writes % 50 == 0) {
+        ESP_LOGI(TAG, "recording progress: writes=%u bytes=%u",
+                 (unsigned)rec_writes, (unsigned)rec_bytes_written);
+    }
 }
 
 void recording_stop(void)
@@ -249,8 +276,12 @@ void recording_stop(void)
         rec_file = NULL;
     }
 
-    uint32_t duration_us = (uint32_t)(esp_timer_get_time()) - rec_start_us;
-    uint32_t duration_ms = duration_us / 1000;
+    uint32_t wall_ms = ((uint32_t)esp_timer_get_time() - rec_start_us) / 1000;
+    uint32_t audio_ms = (uint32_t)((uint64_t)rec_bytes_written * 1000 / PCM_BYTES_PER_SEC);
+
+    ESP_LOGI(TAG, "Write stats for %s: writes=%u bytes=%u wall=%lums audio=%lums",
+             rec_name, (unsigned)rec_writes, (unsigned)rec_bytes_written,
+             (unsigned long)wall_ms, (unsigned long)audio_ms);
 
     // Add to index
     if (note_count < REC_MAX_NOTES) {
@@ -258,13 +289,13 @@ void recording_stop(void)
         strncpy(n->name, rec_name, REC_NAME_LEN - 1);
         n->name[REC_NAME_LEN - 1] = '\0';
         n->timestamp = (uint32_t)(esp_timer_get_time() / 1000000);
-        n->duration_ms = duration_ms;
+        n->duration_ms = audio_ms;
         n->type = rec_type;
         n->status = REC_STATUS_RAW;
         n->text[0] = '\0';
         write_meta(n);
         note_count++;
-        ESP_LOGI(TAG, "Saved %s (%lums)", rec_name, (unsigned long)duration_ms);
+        ESP_LOGI(TAG, "Saved %s (%lums)", rec_name, (unsigned long)audio_ms);
     }
 
     recording = false;
@@ -339,10 +370,8 @@ void recording_play(int idx)
 {
     if (idx < 0 || idx >= note_count) return;
 
-    char path[64];
-    make_rec_path(notes[idx].name, ".pcm", path, sizeof(path));
-    ESP_LOGI(TAG, "Playing %s", path);
-    speaker_play_file(path);
+    ESP_LOGI(TAG, "TONE TEST: playing 1000Hz/1s debug tone instead of recording");
+    speaker_play_tone(1000, 1000);
 }
 
 // ── Sync ────────────────────────────────────────────
@@ -359,15 +388,22 @@ static void sync_send_recording(recording_info_t *n)
 
     int16_t buf[PCM_CHUNK_SAMPLES];
     size_t total_sent = 0;
-    bool ws_ok = true;
+
+    const char *mode = n->type == REC_TYPE_NOTE ? "note" : "todo";
 
     while (1) {
         size_t read = fread(buf, sizeof(int16_t), PCM_CHUNK_SAMPLES, f);
         if (read == 0) break;
 
-        if (ws_ok && ws_client_is_connected()) {
-            ws_client_send_audio_mode((uint8_t *)buf, read * sizeof(int16_t),
-                                      n->type == REC_TYPE_NOTE ? "note" : "todo");
+        char url[256];
+        snprintf(url, sizeof(url), "%s/api/device/audio?mode=%s&session_id=sync_%s",
+                 HERMES_HTTP_URL, mode, n->name);
+
+        char resp[64];
+        esp_err_t ret = http_post_binary(url, (const uint8_t *)buf, read * sizeof(int16_t), resp, sizeof(resp));
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "sync: chunk POST failed: %s", esp_err_to_name(ret));
+            break;
         }
         total_sent += read;
     }
@@ -375,14 +411,14 @@ static void sync_send_recording(recording_info_t *n)
 
     ESP_LOGI(TAG, "Sent %zu samples from %s", total_sent, n->name);
 
-    // Send end marker with session ID
-    if (ws_ok && ws_client_is_connected()) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
-                 "{\"type\":\"end\",\"mode\":\"%s\",\"session_id\":\"sync_%s\"}",
-                 n->type == REC_TYPE_NOTE ? "note" : "todo", n->name);
-        ws_client_send_json(msg);
-    }
+    // Send end marker
+    char url[256];
+    snprintf(url, sizeof(url), "%s/api/device/audio/end?mode=%s", HERMES_HTTP_URL, mode);
+    char json[128];
+    snprintf(json, sizeof(json),
+             "{\"session_id\":\"sync_%s\"}", n->name);
+    char resp[64];
+    http_post_json(url, json, resp, sizeof(resp));
 }
 
 static void sync_task(void *arg)
@@ -417,7 +453,7 @@ void recording_sync_start(void)
 {
     if (sync_busy) return;
     if (recording_pending_sync_count() == 0) return;
-    if (!ws_client_is_connected()) return;
+    if (!wifi_is_connected()) return;
 
     sync_busy = true;
     xTaskCreate(sync_task, "rec_sync", 4096, NULL, 3, NULL);

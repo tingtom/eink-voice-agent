@@ -13,7 +13,9 @@
 
 typedef enum {
     REC_TYPE_NOTE = 0,
-    REC_TYPE_TODO = 1
+    REC_TYPE_TODO = 1,
+    REC_TYPE_AGENT = 2,
+    REC_TYPE_TRANSCRIBE = 3
 } rec_type_t;
 
 typedef enum {
@@ -36,6 +38,7 @@ typedef struct {
  * Must be called once at startup.
  */
 bool recordings_init(void);
+void recordings_init_audio(void);
 
 // ── Recording ───────────────────────────────────────
 

@@ -14,6 +14,7 @@
 #include "app_config.h"
 #include "epaper_driver.h"
 #include "mic_driver.h"
+#include "power_mgmt.h"
 #include "system_init.h"
 
 static const char *TAG = "POWER";
@@ -26,6 +27,8 @@ static int32_t wake_count = 0;
 
 void power_init(void)
 {
+    if (initialized) return;
+
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = ADC_UNIT_1,
         .atten = ADC_ATTEN_DB_12,
@@ -40,7 +43,11 @@ void power_init(void)
     adc_oneshot_unit_init_cfg_t unit_cfg = {
         .unit_id = ADC_UNIT_1,
     };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &adc_handle));
+    esp_err_t ret = adc_oneshot_new_unit(&unit_cfg, &adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init ADC1: %s", esp_err_to_name(ret));
+        return;
+    }
 
     adc_oneshot_chan_cfg_t chan_cfg = {
         .atten = ADC_ATTEN_DB_12,
@@ -63,7 +70,7 @@ void power_init(void)
     ESP_LOGI(TAG, "Power management initialized (wake #%" PRId32 ")", wake_count);
 }
 
-static int read_battery_mv(void)
+int power_read_battery_mv(void)
 {
     if (!adc_handle) {
         ESP_LOGW(TAG, "ADC handle NULL, reinitializing");
@@ -80,14 +87,14 @@ static int read_battery_mv(void)
     if (cali_handle && adc_cali_raw_to_voltage(cali_handle, raw, &mv) == ESP_OK) {
         mv *= 2; // voltage divider: VBAT = 2 × ADC voltage
     } else {
-        mv = (raw * BATTERY_MAX_MV) / 4095;
+        mv = (raw * BATTERY_MAX_MV) / 4095 * 2; // fallback also accounts for divider
     }
     return mv;
 }
 
 uint8_t power_get_battery_pct(void)
 {
-    int mv = read_battery_mv();
+    int mv = power_read_battery_mv();
     if (mv <= BATTERY_MIN_MV) return 0;
     if (mv >= BATTERY_MAX_MV) return 100;
     return (uint8_t)((mv - BATTERY_MIN_MV) * 100 / (BATTERY_MAX_MV - BATTERY_MIN_MV));
@@ -95,20 +102,19 @@ uint8_t power_get_battery_pct(void)
 
 bool power_is_charging(void)
 {
-    // TCA9554 pins configured as input (bits 1=INPUT in config register):
-    // P2 (bit 2), P6 (bit 6), P7 (bit 7) — any could be charger status
-    static const uint8_t INPUT_PINS = (1 << 2) | (1 << 6) | (1 << 7);
-    uint8_t inputs = tca9554_read_input();
-    // Active-low charge indicator: pin pulled low when charging
-    if ((~inputs) & INPUT_PINS) {
-        int mv = read_battery_mv();
-        if (mv > BATTERY_MIN_MV + 200) {
-            return true;
-        }
+    if (!system_tca9554_present()) {
+        return false;
     }
-    // Fallback: voltage near max suggests plugged in
-    int mv = read_battery_mv();
-    return mv >= (BATTERY_MAX_MV - 30);
+    // TCA9554 charger status pin: P2 is driven LOW by the charger IC when active.
+    // Only P2 is used — P6/P7 are not wired to a charger status signal.
+    static const uint8_t CHARGER_PIN = (1 << 2);
+    uint8_t inputs = tca9554_read_input();
+    bool charger_pin_active = ((~inputs) & CHARGER_PIN) != 0;
+    if (!charger_pin_active) {
+        return false;
+    }
+    int mv = power_read_battery_mv();
+    return mv > BATTERY_MIN_MV + 200;
 }
 
 int32_t power_get_wake_count(void)

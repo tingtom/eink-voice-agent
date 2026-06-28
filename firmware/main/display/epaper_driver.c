@@ -164,6 +164,16 @@ static void draw_rect_helper(int x, int y, int w, int h, int fill)
     }
 }
 
+void epaper_clear_rect(int x, int y, int w, int h)
+{
+    if (w <= 0 || h <= 0) return;
+    for (int py = y; py < y + h && py < DISPLAY_HEIGHT; py++) {
+        for (int px = x; px < x + w && px < DISPLAY_WIDTH; px++) {
+            set_pixel(px, py, 1);
+        }
+    }
+}
+
 void epaper_draw_rect(int x, int y, int w, int h, int fill)
 {
     if (x < 0) { w += x; x = 0; }

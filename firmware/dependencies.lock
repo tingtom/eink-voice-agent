@@ -33,16 +33,6 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.5.10
-  espressif/esp_websocket_client:
-    component_hash: 3fb288702517ef4d75bf933a115f1056ee0c2540d964f9e1d856e0bb67e1dfeb
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.7.0
   espressif/mdns:
     component_hash: 291732b5df4d181eb75eba9042799a508c4c124503a0c0573132a0a48d2e3fbe
     dependencies:
@@ -56,14 +46,14 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.4.0
+    version: 6.0.1
   lvgl/lvgl:
-    component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
+    component_hash: 17e68bfd21f0edf4c3ee838e2273da840bf3930e5dbc3bfa6c1190c3aed41f9f
     dependencies: []
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 9.5.0
+    version: 9.4.0
   tuanpmt/esp_epaper:
     component_hash: 6962768da0b1ac4908a72c9991141c7878975e1bec363de1adcab52f49ee8e3e
     dependencies:
@@ -88,9 +78,8 @@ direct_dependencies:
 - espressif/esp-nn
 - espressif/esp-tflite-micro
 - espressif/esp_codec_dev
-- espressif/esp_websocket_client
 - espressif/mdns
 - tuanpmt/esp_epaper
-manifest_hash: ee295c32ca927104d9b3d9be8b5edc773a0d2c554ee69ab0901fd3edff066409
+manifest_hash: c3827fa9cbb57e825104ed58a0fb4c64c4dd144247acbf1706de63e7009f68cb
 target: esp32c6
-version: 2.0.0
+version: 3.0.0

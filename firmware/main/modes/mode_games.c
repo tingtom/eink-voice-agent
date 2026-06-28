@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "app_config.h"
 #include "epaper_driver.h"
+#include "ui_manager.h"
 #include "mode_games.h"
 
 static const char *TAG = "TOMAGOTCHI";
@@ -289,12 +290,12 @@ static void draw_action_bar(void)
             epaper_draw_text(8, 140, result_buf, 12);
         } else {
             show_result = false;
-            epaper_draw_text(8, 140, "PWR=down BOOT=up", 8);
         }
-    } else {
-        epaper_draw_text(8, 140, "PWR=down BOOT=up", 8);
     }
-    epaper_draw_text(8, 160, "BOOTlong=act PWRlong=exit", 8);
+    epaper_draw_text(DISPLAY_WIDTH - 54, 164, "up -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - 54, 172, "down -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - 54, 180, "act(l) -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - 54, 188, "exit(l) -", 8);
 }
 
 static void draw_game_screen(void)

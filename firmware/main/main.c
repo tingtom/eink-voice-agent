@@ -9,6 +9,9 @@
 #include "esp_sleep.h"
 #include "esp_idf_version.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
+#include "esp_wifi.h"
 
 #include "app_config.h"
 #include "nvs_flash.h"
@@ -20,7 +23,6 @@
 #include "audio_pipeline.h"
 #include "vad.h"
 #include "mic_driver.h"
-#include "ws_client.h"
 #include "power_mgmt.h"
 #include "provisioning.h"
 #include "mode_voice_agent.h"
@@ -30,11 +32,48 @@
 #include "mode_dashboard.h"
 #include "mode_games.h"
 #include "recordings.h"
+#include "http_client.h"
 #include "sdcard.h"
 #include "mdns.h"
 #include "driver/spi_common.h"
+#include "esp_log.h"
 
 static const char *TAG = "MAIN";
+
+#define NVS_NS_BOD  "bod_diag"
+#define NVS_KEY_LAST  "last_stage"
+
+static const char *g_last_stage = NULL;
+
+static void bod_save_stage(const char *stage)
+{
+    g_last_stage = stage;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BOD, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, NVS_KEY_LAST, stage);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+static void bod_check_prior(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BOD, NVS_READONLY, &h) == ESP_OK) {
+        char buf[32] = {0};
+        size_t len = sizeof(buf);
+        if (nvs_get_str(h, NVS_KEY_LAST, buf, &len) == ESP_OK) {
+            esp_reset_reason_t reason = esp_reset_reason();
+            const char *cause = (reason == ESP_RST_BROWNOUT) ? "BOD RESET" : "unknown reset";
+            ESP_LOGW(TAG, "Prior boot ended at stage: '%s' (%s)", buf, cause);
+            if (strstr(buf, "home") || strstr(buf, "WiFi") || strstr(buf, "EPD")) {
+                ESP_LOGW(TAG, ">>> High-current stage before crash — battery BOD likely");
+                ESP_LOGW(TAG, ">>> Fix: lower BOD threshold in menuconfig, or use stronger battery");
+            }
+        }
+        nvs_close(h);
+    }
+}
 
 #define VAD_BURST_POLL_US  (200 * 1000)
 #define VAD_BURST_SAMPLES  256
@@ -65,6 +104,21 @@ static sub_state_t current_sub = SUB_MENU;
 static int menu_selection = 0;
 static bool was_charging = false;
 static bool wake_failed_pending = false;
+static bool docked_user_exited = false;
+static bool charging_debounced = false;
+static int charging_unchanged_count = 0;
+
+static bool get_charging_state(void)
+{
+    bool raw = power_is_charging();
+    if (raw == charging_debounced) {
+        charging_unchanged_count++;
+    } else {
+        charging_unchanged_count = 1;
+        charging_debounced = raw;
+    }
+    return charging_debounced;
+}
 
 // View notes state
 static int notes_list_offset = 0;
@@ -90,6 +144,32 @@ static app_mode_t menu_mode_map[] = {
     APP_MODE_VIEW_NOTES,
     APP_MODE_SYNC,
 };
+
+#define MAX_VISIBLE_MENU 7
+static const char *visible_menu_items[MAX_VISIBLE_MENU];
+static app_mode_t visible_menu_modes[MAX_VISIBLE_MENU];
+static int visible_menu_count = 0;
+
+static void rebuild_visible_menu(void)
+{
+    visible_menu_count = 0;
+    for (int i = 0; i < menu_count; i++) {
+        if (strcmp(menu_items[i], "Voice Agent") == 0) {
+            if (!wifi_is_connected() || !ui_is_hermes_connected()) continue;
+        } else if (strcmp(menu_items[i], "Sync") == 0) {
+            if (!wifi_is_connected() || !ui_is_hermes_connected()) continue;
+        }
+        visible_menu_items[visible_menu_count] = menu_items[i];
+        visible_menu_modes[visible_menu_count] = menu_mode_map[i];
+        visible_menu_count++;
+    }
+    if (menu_selection >= visible_menu_count) {
+        menu_selection = visible_menu_count > 0 ? visible_menu_count - 1 : 0;
+    }
+}
+
+static void draw_note_list(void);
+static void draw_note_detail(int idx);
 
 static void on_wake_failed(void)
 {
@@ -134,12 +214,10 @@ static void enter_mode(app_mode_t mode)
             notes_sel = 0;
             notes_list_offset = 0;
             current_sub = SUB_NOTE_LIST;
-            // Fall through to draw
-            ui_show_menu((const char **)NULL, 0, 0); // clear screen
-            // Will draw note list on next button press
+            draw_note_list();
             break;
         case APP_MODE_SYNC:
-            if (!ws_client_is_connected()) {
+            if (!wifi_is_connected()) {
                 ui_show_error("No WiFi\nCan't sync");
                 current_app_mode = APP_MODE_HOME;
                 current_sub = SUB_MENU;
@@ -158,11 +236,15 @@ static void enter_mode(app_mode_t mode)
     }
 }
 
-static void return_home(void)
+static void return_home(bool from_button)
 {
     current_app_mode = APP_MODE_HOME;
     current_sub = SUB_MENU;
     menu_selection = 0;
+    if (from_button) {
+        docked_user_exited = true;
+    }
+    rebuild_visible_menu();
     ui_show_home_screen();
 }
 
@@ -184,7 +266,8 @@ static void draw_note_list(void)
     int count = recording_count();
     if (count == 0) {
         epaper_clear();
-        epaper_draw_text(10, 60, "No offline recordings", 12);
+        int tw = epaper_text_width("No offline recordings", 12);
+        epaper_draw_text((DISPLAY_WIDTH - tw) / 2, DISPLAY_HEIGHT / 2 - 8, "No offline recordings", 12);
         epaper_partial_refresh();
         return;
     }
@@ -201,13 +284,6 @@ static void draw_note_list(void)
     epaper_clear();
     epaper_draw_text(4, 8, "Recordings", 12);
 
-    uint32_t free_secs = recording_capacity_seconds();
-    char cap_line[24];
-    if (free_secs > 0) {
-        snprintf(cap_line, sizeof(cap_line), "~%lus free", (unsigned long)free_secs);
-        epaper_draw_text(4, 22, cap_line, 8);
-    }
-
     int y = 36;
     for (int i = notes_list_offset; i < count && i < notes_list_offset + visible; i++) {
         recording_info_t info;
@@ -223,16 +299,28 @@ static void draw_note_list(void)
 
         char line[40];
         const char *short_name = info.name + 4;
+        uint32_t dur_s = info.duration_ms / 1000;
         if (i == notes_sel) {
-            snprintf(line, sizeof(line), ">%.11s %c", short_name, icon);
+            snprintf(line, sizeof(line), ">%.11s %c %u:%02u", short_name, icon, (unsigned)(dur_s / 60), (unsigned)(dur_s % 60));
         } else {
-            snprintf(line, sizeof(line), " %.11s %c", short_name, icon);
+            snprintf(line, sizeof(line), " %.11s %c %u:%02u", short_name, icon, (unsigned)(dur_s / 60), (unsigned)(dur_s % 60));
         }
         epaper_draw_text(8, y, line, 8);
         y += 14;
     }
 
-    epaper_draw_text(4, DISPLAY_HEIGHT - 14, "o=raw T=text *=done SEL=open", 8);
+    int tw;
+    tw = epaper_text_width("back -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 24, "back -", 8);
+    tw = epaper_text_width("sel -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 16, "sel -", 8);
+
+    uint32_t free_secs = recording_capacity_seconds();
+    if (free_secs > 0) {
+        char cap_line[24];
+        snprintf(cap_line, sizeof(cap_line), "%lum", (unsigned long)(free_secs / 60));
+        epaper_draw_text(4, DISPLAY_HEIGHT - 14, cap_line, 8);
+    }
     epaper_partial_refresh();
 }
 
@@ -255,10 +343,9 @@ static void draw_note_detail(int idx)
     }
 
     char dur[24];
-    snprintf(dur, sizeof(dur), "%lums", (unsigned long)info.duration_ms);
+    snprintf(dur, sizeof(dur), "%lus", (unsigned long)(info.duration_ms / 1000));
     epaper_draw_text(4, DISPLAY_HEIGHT - 14, dur, 8);
-
-    epaper_draw_text(100, DISPLAY_HEIGHT - 14, "BOOTlong=play BACK=back", 8);
+    ui_draw_button_help("hold to play -", "back -");
     epaper_partial_refresh();
 }
 
@@ -271,7 +358,7 @@ static void handle_longpress(button_id_t btn)
     if (audio_pipeline_is_docked()) {
         ESP_LOGI(TAG, "Exiting docked mode via button press");
         audio_pipeline_set_docked(false);
-        return_home();
+        return_home(true);
         return;
     }
 
@@ -284,7 +371,7 @@ static void handle_longpress(button_id_t btn)
             power_enter_deep_sleep(0);
         } else if (btn == BUTTON_SELECT) {
             // BOOT long = enter mode
-            enter_mode(menu_mode_map[menu_selection]);
+            enter_mode(visible_menu_modes[menu_selection]);
         }
         return;
     }
@@ -294,7 +381,7 @@ static void handle_longpress(button_id_t btn)
         switch (current_app_mode) {
         case APP_MODE_GAMES:
             mode_games_do_action();
-            if (!mode_games_is_active()) return_home();
+            if (!mode_games_is_active()) return_home(false);
             return;
         case APP_MODE_VIEW_NOTES:
             if (current_sub == SUB_NOTE_LIST) {
@@ -306,7 +393,7 @@ static void handle_longpress(button_id_t btn)
             }
             return;
         case APP_MODE_SYNC:
-            return_home();
+            return_home(false);
             return;
         default:
             break;
@@ -316,15 +403,15 @@ static void handle_longpress(button_id_t btn)
         case SUB_RECORDING:
             audio_pipeline_stop_offline_recording();
             audio_pipeline_stop_recording();
-            return_home();
+            return_home(false);
             break;
         case SUB_PROCESSING:
             finish_current_mode();
-            return_home();
+            return_home(false);
             break;
         case SUB_RESPONSE:
             finish_current_mode();
-            return_home();
+            return_home(false);
             break;
         default:
             break;
@@ -337,11 +424,11 @@ static void handle_longpress(button_id_t btn)
         switch (current_app_mode) {
         case APP_MODE_GAMES:
             mode_games_finish();
-            return_home();
+            return_home(false);
             return;
         case APP_MODE_VIEW_NOTES:
         case APP_MODE_SYNC:
-            return_home();
+            return_home(false);
             return;
         default:
             break;
@@ -351,12 +438,12 @@ static void handle_longpress(button_id_t btn)
         case SUB_RECORDING:
             audio_pipeline_stop_offline_recording();
             audio_pipeline_stop_recording();
-            return_home();
+            return_home(false);
             break;
         case SUB_PROCESSING:
         case SUB_RESPONSE:
             finish_current_mode();
-            return_home();
+            return_home(false);
             break;
         default:
             break;
@@ -369,30 +456,31 @@ static void handle_button(button_id_t btn)
     if (audio_pipeline_is_docked()) {
         ESP_LOGI(TAG, "Exiting docked mode via button press");
         audio_pipeline_set_docked(false);
-        return_home();
+        return_home(true);
         return;
     }
 
     switch (current_app_mode) {
     case APP_MODE_HOME: {
+        rebuild_visible_menu();
         // BOOT short = UP (wrap), PWR short = DOWN (wrap)
         if (btn == BUTTON_SELECT) {
-            menu_selection = (menu_selection > 0) ? menu_selection - 1 : menu_count - 1;
-            ui_show_menu(menu_items, menu_count, menu_selection);
+            menu_selection = (menu_selection > 0) ? menu_selection - 1 : visible_menu_count - 1;
+            ui_show_menu((const char **)visible_menu_items, visible_menu_count, menu_selection);
         } else if (btn == BUTTON_BACK) {
-            menu_selection = (menu_selection + 1) % menu_count;
-            ui_show_menu(menu_items, menu_count, menu_selection);
+            menu_selection = (menu_selection + 1) % visible_menu_count;
+            ui_show_menu((const char **)visible_menu_items, visible_menu_count, menu_selection);
         }
         break;
     }
     case APP_MODE_GAMES:
         mode_games_handle_button(btn);
-        if (!mode_games_is_active()) return_home();
+        if (!mode_games_is_active()) return_home(false);
         break;
 
     case APP_MODE_VIEW_NOTES: {
         int count = recording_count();
-        if (count == 0) { return_home(); break; }
+        if (count == 0) { return_home(false); break; }
         if (current_sub == SUB_NOTE_LIST) {
             // BOOT short = UP (wrap), PWR short = DOWN (wrap)
             if (btn == BUTTON_SELECT) {
@@ -410,7 +498,7 @@ static void handle_button(button_id_t btn)
     }
 
     case APP_MODE_SYNC:
-        return_home();
+        return_home(false);
         break;
 
     default:
@@ -437,83 +525,13 @@ static void handle_button(button_id_t btn)
             current_sub = SUB_PROCESSING;
         } else if (current_sub == SUB_RESPONSE) {
             finish_current_mode();
-            return_home();
+            return_home(false);
         } else if (current_sub == SUB_PROCESSING) {
             finish_current_mode();
-            return_home();
+            return_home(false);
         }
         break;
     }
-}
-
-// ── WebSocket message handler ───────────────────────────────
-
-static void handle_ws_message(const char *data, size_t len)
-{
-    (void)len;
-    const char *type_key = "\"type\":\"";
-    const char *type_start = strstr(data, type_key);
-    if (!type_start) return;
-    type_start += strlen(type_key);
-    if (strncmp(type_start, "response", 8) != 0) return;
-
-    const char *data_key = "\"data\":\"";
-    const char *data_start = strstr(data, data_key);
-    if (!data_start) return;
-    data_start += strlen(data_key);
-
-    const char *end = strchr(data_start, '"');
-    if (!end) return;
-
-    size_t text_len = end - data_start;
-    if (text_len == 0) return;
-
-    char *text = malloc(text_len + 1);
-    if (!text) return;
-    memcpy(text, data_start, text_len);
-    text[text_len] = '\0';
-
-    // Route to sync handler when syncing
-    if (recording_sync_is_busy()) {
-        const char *sid_key = "\"session_id\":\"";
-        const char *sid_start = strstr(data, sid_key);
-        if (sid_start) {
-            sid_start += strlen(sid_key);
-            const char *sid_end = strchr(sid_start, '"');
-            if (sid_end) {
-                size_t sid_len = sid_end - sid_start;
-                char *sid = malloc(sid_len + 1);
-                if (sid) {
-                    memcpy(sid, sid_start, sid_len);
-                    sid[sid_len] = '\0';
-                    recording_sync_handle_response(sid, text);
-                    free(sid);
-                }
-            }
-        }
-        free(text);
-        return;
-    }
-
-    switch (current_app_mode) {
-        case APP_MODE_VOICE_AGENT:
-            mode_voice_agent_handle_response(text);
-            break;
-        case APP_MODE_TRANSCRIBE:
-            mode_transcribe_handle_response(text);
-            break;
-        case APP_MODE_NOTE:
-            mode_note_save(text);
-            break;
-        case APP_MODE_TODO:
-            mode_todo_handle_response(text);
-            break;
-        default:
-            free(text);
-            return;
-    }
-    free(text);
-    current_sub = SUB_RESPONSE;
 }
 
 // ── VAD burst for timer wake ────────────────────────────────
@@ -567,15 +585,29 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Device: %s", DEVICE_NAME);
 
+    // Report prior boot mode before any NVS access
+    esp_reset_reason_t reason = esp_reset_reason();
+    if (reason == ESP_RST_BROWNOUT) {
+        ESP_LOGW(TAG, "!!! PREVIOUS BOOT ended in BROWN-OUT RESET");
+    }
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+    bod_check_prior();
 
     system_init();
+    bod_save_stage("system_init");
+    ESP_LOGI(TAG, "Stage 2 OK: I/O expander + power rails");
+    uint8_t bat_pct = power_get_battery_pct();
+    ESP_LOGI(TAG, "Battery: %d%%", bat_pct);
+
     power_init();
+    bod_save_stage("power_init");
+    ESP_LOGI(TAG, "Stage 3 OK: ADC + power mgmt");
 
     // Pre-init shared SPI bus with full config (incl. MISO) before e-paper
     // claims it. E-paper driver omits MISO (write-only), which breaks SD card.
@@ -595,27 +627,49 @@ void app_main(void)
     }
 
     epaper_init();
+    ESP_LOGI(TAG, "Stage 4 OK: E-paper display initialized");
+    bod_save_stage("epaper_init");
     ui_init();
     recordings_init();
+    ESP_LOGI(TAG, "Stage 5 OK: UI + storage initialized");
 
     if (!wifi_has_saved_creds()) {
         ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");
         ui_show_boot_screen("Setup Mode");
+        ESP_LOGI(TAG, "Stage 6 OK: boot screen shown");
         wifi_init();
+        esp_log_level_set("wifi", ESP_LOG_ERROR);
         provisioning_start_ap();
         provisioning_start_server();
         ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
+        ESP_LOGI(TAG, "PROVISIONING MODE");
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(60000));
         }
     }
 
     ui_show_boot_screen(DEVICE_NAME);
+    ESP_LOGI(TAG, "Stage 6 OK: boot screen shown");
 
     char ssid[64], password[64];
     wifi_load_creds(ssid, sizeof(ssid), password, sizeof(password));
+    ESP_LOGI(TAG, "Stage 7 OK: WiFi creds loaded");
+    bod_save_stage("wifi_start");
+
+    // On battery: cap WiFi TX power to reduce peak-current brownout risk.
+    // esp_wifi_set_max_tx_power value is in 0.25dBm units; default is ~78 (+19.5dBm).
+    // Setting to 8 caps at +2dBm — sufficient to connect, cuts peak current significantly.
+    int bat_mv = power_read_battery_mv();
+    if (bat_mv < 3900) {
+        ESP_LOGW(TAG, "Low battery (%dmV), capping WiFi TX power to +2dBm", bat_mv);
+        esp_wifi_set_max_tx_power(8);
+    }
+
     wifi_init();
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
+    ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
     wifi_connect(ssid, password);
+    ESP_LOGI(TAG, "Stage 9: WiFi connecting (up to 30s)...");
 
     int retries = 0;
     while (!wifi_is_connected() && retries < 30) {
@@ -624,67 +678,66 @@ void app_main(void)
     }
 
     if (wifi_is_connected()) {
-        ESP_LOGI(TAG, "WiFi connected");
-        ui_update_status_bar(true, ws_client_is_connected(), power_get_battery_pct());
+        ESP_LOGI(TAG, "Stage 10 OK: WiFi connected (%s)", wifi_get_ip());
+        bod_save_stage("wifi_connected");
 
-        // mDNS advertisement
-        ESP_ERROR_CHECK(mdns_init());
-        ESP_ERROR_CHECK(mdns_hostname_set(DEVICE_NAME));
-        ESP_ERROR_CHECK(mdns_instance_name_set("EInk Voice Agent"));
-        mdns_service_add("eink-voice-http", "_http", "_tcp", 80, NULL, 0);
-        mdns_service_add("eink-voice-agent", "_eink-voice-gateway", "_tcp", 8123, NULL, 0);
-        mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "device_type", "eink_voice_agent");
-        mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "version", "1.0");
-        ESP_LOGI(TAG, "mDNS started — device available as %s.local", DEVICE_NAME);
+        ESP_LOGI(TAG, "Stage 11: Authenticating with Hermes server...");
+        char auth_url[128];
+        snprintf(auth_url, sizeof(auth_url), "%s/api/device/auth", HERMES_HTTP_URL);
+        char auth_body[128];
+        snprintf(auth_body, sizeof(auth_body), "{\"device_id\":\"%s\"}", DEVICE_ID);
+        char auth_resp[64];
+        esp_err_t auth_ret = http_post_json(auth_url, auth_body, auth_resp, sizeof(auth_resp));
+        if (auth_ret == ESP_OK) {
+            ESP_LOGI(TAG, "Stage 11 OK: Hermes auth success");
+        } else {
+            ESP_LOGW(TAG, "Stage 11: Hermes auth failed: %s", esp_err_to_name(auth_ret));
+        }
+        bod_save_stage("hermes_auth");
+
+        ESP_LOGI(TAG, "Stage 12: Finalizing audio + buttons...");
+        recordings_init_audio();
+        audio_pipeline_init();
+        audio_pipeline_set_wake_failed_cb(on_wake_failed);
+        audio_pipeline_set_recording_ended_cb(on_recording_ended);
+        button_set_callback(handle_button);
+        button_set_longpress_callback(handle_longpress, 1500);
+        buttons_init();
+        ESP_LOGI(TAG, "Stage 13 OK: Audio, buttons ready");
+        bod_save_stage("ready_for_home");
     } else {
-        ESP_LOGW(TAG, "WiFi connection failed, starting provisioning");
+        ESP_LOGW(TAG, "Stage 10: WiFi not connected, starting provisioning");
         provisioning_start_ap();
         provisioning_start_server();
         ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
+        ESP_LOGI(TAG, "PROVISIONING MODE — waiting for WiFi");
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(60000));
         }
     }
-
-    audio_pipeline_init();
-    audio_pipeline_set_wake_failed_cb(on_wake_failed);
-    audio_pipeline_set_recording_ended_cb(on_recording_ended);
-    ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
-    button_set_callback(handle_button);
-    button_set_longpress_callback(handle_longpress, 1500);
-    ws_client_set_callback(handle_ws_message);
-    buttons_init();
-    ui_show_home_screen();
-
-    // If already charging at boot, enter docked state
-    if (power_is_charging()) {
+    if (get_charging_state()) {
         ESP_LOGI(TAG, "Already charging at boot, entering docked state");
         was_charging = true;
         audio_pipeline_set_docked(true);
         ui_show_docked_screen();
+    } else {
+        ui_show_home_screen();
+        rebuild_visible_menu();
     }
 
     ESP_LOGI(TAG, "Initialization complete, entering main loop");
+    bod_save_stage("main_loop");
 
     int telemetry_ticks = 0;
-    static int64_t last_ws_reconnect_ticks = 0;
+    int bod_watchdog = 0;
 
     while (1) {
-        ws_client_reconnect();
-
-        if (ws_client_needs_reset()) {
-            int64_t now = esp_timer_get_time() / 1000;
-            if (now - last_ws_reconnect_ticks > 5000) {
-                ESP_LOGW(TAG, "WebSocket stale connection detected, resetting client");
-                ws_client_destroy();
-                ws_client_init(HERMES_WS_URL, DEVICE_AUTH_TOKEN);
-                last_ws_reconnect_ticks = now;
-            }
-        }
+        bod_watchdog++;
+        if (bod_watchdog % 12 == 0) bod_save_stage("main_loop_idle");
         uint8_t battery = power_get_battery_pct();
         ui_update_battery(battery);
         ui_update_wifi_status(wifi_is_connected());
-        ui_update_hermes_status(ws_client_is_connected());
+        ui_update_hermes_status(wifi_is_connected());
 
         // Handle wake word failure - return to home screen
         if (wake_failed_pending) {
@@ -695,20 +748,21 @@ void app_main(void)
         }
 
         // ── Charging state transitions ──────────────────────
-        bool now_charging = power_is_charging();
+        bool now_charging = get_charging_state();
 
         if (now_charging != was_charging) {
             if (now_charging) {
                 ESP_LOGI(TAG, "Charging detected");
-                if (current_app_mode == APP_MODE_HOME && current_sub == SUB_MENU) {
+                if (current_app_mode == APP_MODE_HOME && current_sub == SUB_MENU && !docked_user_exited) {
                     audio_pipeline_set_docked(true);
                     ui_show_docked_screen();
                 }
             } else {
                 ESP_LOGI(TAG, "Charging disconnected");
-                audio_pipeline_set_docked(false);
-                if (current_app_mode == APP_MODE_HOME) {
-                    return_home();
+                docked_user_exited = false;
+                if (audio_pipeline_is_docked() && current_app_mode == APP_MODE_HOME) {
+                    audio_pipeline_set_docked(false);
+                    return_home(false);
                 }
             }
             was_charging = now_charging;
@@ -717,7 +771,7 @@ void app_main(void)
 
         // ── Periodic telemetry + mDNS TXT update (every ~30s) ──
         telemetry_ticks++;
-        if (telemetry_ticks >= 6 && ws_client_is_connected()) {
+        if (telemetry_ticks >= 6 && wifi_is_connected()) {
             telemetry_ticks = 0;
 
             uint8_t bat = power_get_battery_pct();
@@ -742,7 +796,11 @@ void app_main(void)
                 "}",
                 (unsigned)bat, chg ? "true" : "false", (int)rssi,
                 (uint64_t)uptime_s, wc, free_kb, cap_sec);
-            ws_client_send_json(json);
+
+            char url[128];
+            snprintf(url, sizeof(url), "%s/api/device/telemetry", HERMES_HTTP_URL);
+            char resp[64];
+            http_post_json(url, json, resp, sizeof(resp));
 
             // Update mDNS TXT records with live values
             char buf[16];
@@ -754,8 +812,10 @@ void app_main(void)
             mdns_service_txt_item_set("_eink-voice-gateway", "_tcp", "wifi_rssi", buf);
         }
 
-        // Skip sleep timer when docked (on USB power)
-        bool docked = now_charging;
+        // Docked mode (sleep timer suppressed) only when TCA9554 is present AND
+        // charger pin is active. Without the expander we cannot detect USB, so
+        // the device conservatively follows normal battery sleep behaviour.
+        bool docked = system_tca9554_present() && now_charging;
         if (!docked && power_should_sleep()) {
             ESP_LOGI(TAG, "Entering deep sleep...");
             ui_show_sleep_screen();

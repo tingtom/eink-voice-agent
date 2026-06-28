@@ -5,6 +5,7 @@
 
 void power_init(void);
 uint8_t power_get_battery_pct(void);
+int power_read_battery_mv(void);
 bool power_is_charging(void);
 int32_t power_get_wake_count(void);
 bool power_should_sleep(void);

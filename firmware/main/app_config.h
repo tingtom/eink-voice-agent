@@ -10,7 +10,6 @@
 
 // ── Hermes Server (overridden by mDNS discovery if available) ─
 #define HERMES_HTTP_URL     "http://192.168.1.25:8123"
-#define HERMES_WS_URL       "ws://192.168.1.25:8123/api/device/ws"
 
 // ── Pin Definitions (Waveshare ESP32-C6-ePaper-1.54) ────────
 // I2C Bus (shared by TCA9554, PCF85063 RTC, SHTC3 sensor)
@@ -18,7 +17,7 @@
 #define I2C_SCL_GPIO        8
 #define I2C_PORT            I2C_NUM_0
 
-// TCA9554 I/O Expander (I2C addr 0x38) - virtual GPIOs
+// PCA9554A I/O Expander (I2C addr 0x3F) — A0=A1=A2=HIGH
 #define EXIO_EPD_PWR        0
 #define EXIO_AUDIO_PWR      1
 #define EXIO_AMP_ENABLE     3
@@ -56,7 +55,7 @@
 
 // ── Audio ────────────────────────────────────────────────────
 #define AUDIO_SAMPLE_RATE   16000
-#define AUDIO_BUFFER_SIZE   2048
+#define AUDIO_BUFFER_SIZE   16384
 #define AUDIO_CHANNELS      1
 
 // ── Voice Activity Detection ─────────────────────────────────
@@ -66,7 +65,7 @@
 
 // ── Wake Word ────────────────────────────────────────────────
 #define WAKE_WORD           "hi jeff"
-#define WAKE_WORD_SENSITIVITY       0.3f
+#define WAKE_WORD_SENSITIVITY       0.15f
 #define WAKE_WORD_MODEL_PATH   "/models/tflite_learn_1037720_5.h"
 
 // ── Battery ──────────────────────────────────────────────────
@@ -82,10 +81,5 @@
 #define DISPLAY_HEIGHT      200
 #define DISPLAY_FULL_REFRESH_MS  2000
 #define DISPLAY_PARTIAL_REFRESH_MS 300
-
-// ── WebSocket ────────────────────────────────────────────────
-#define WS_RECONNECT_INTERVAL_MS 5000
-#define WS_PING_INTERVAL_SEC    30
-#define WS_TIMEOUT_MS           10000
 
 #endif

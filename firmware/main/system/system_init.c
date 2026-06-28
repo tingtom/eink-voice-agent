@@ -1,46 +1,72 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_config.h"
 
 static const char *TAG = "SYSTEM";
 
-#define TCA9554_ADDR        0x38
-#define TCA9554_INPUT       0x00
-#define TCA9554_OUTPUT      0x01
-#define TCA9554_CONFIG      0x03
+#define PCA9554A_ADDR       0x3F
+#define TCA9554_ADDR_FB     0x38
+#define TCA9554_INPUT        0x00
+#define TCA9554_OUTPUT       0x01
+#define TCA9554_CONFIG       0x03
+#define TCA9554_PROBE_TIMEOUT pdMS_TO_TICKS(5)
+#define TCA9554_XFER_TIMEOUT  pdMS_TO_TICKS(100)
 
 static i2c_master_bus_handle_t i2c_bus = NULL;
 static i2c_master_dev_handle_t tca9554_dev = NULL;
+static bool tca9554_present = false;
 
-void *get_i2c_bus_handle(void)
+static bool i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr)
 {
-    return (void *)i2c_bus;
+    return i2c_master_probe(bus, addr, TCA9554_PROBE_TIMEOUT) == ESP_OK;
+}
+
+static esp_err_t tca9554_safe_write_reg(uint8_t reg, uint8_t val)
+{
+    uint8_t data[2] = { reg, val };
+    esp_err_t ret = i2c_master_transmit(tca9554_dev, data, 2, TCA9554_XFER_TIMEOUT);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "TCA9554 write reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+static esp_err_t tca9554_safe_read(uint8_t reg, uint8_t *val)
+{
+    esp_err_t ret = i2c_master_transmit(tca9554_dev, &reg, 1, TCA9554_XFER_TIMEOUT);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "TCA9554 reg 0x%02X transmit failed: %s", reg, esp_err_to_name(ret));
+        return ret;
+    }
+    ret = i2c_master_receive(tca9554_dev, val, 1, TCA9554_XFER_TIMEOUT);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "TCA9554 reg 0x%02X read failed: %s", reg, esp_err_to_name(ret));
+    }
+    return ret;
 }
 
 static void tca9554_write_reg(uint8_t reg, uint8_t val)
 {
-    uint8_t data[2] = {reg, val};
-    i2c_master_transmit(tca9554_dev, data, 2, 100);
+    tca9554_safe_write_reg(reg, val);
 }
 
 uint8_t tca9554_read_input(void)
 {
-    uint8_t reg = TCA9554_INPUT;
+    if (!tca9554_present) return 0xFF;
     uint8_t val;
-    i2c_master_transmit(tca9554_dev, &reg, 1, 100);
-    i2c_master_receive(tca9554_dev, &val, 1, 100);
+    if (tca9554_safe_read(TCA9554_INPUT, &val) != ESP_OK) return 0xFF;
     return val;
 }
 
 static uint8_t tca9554_read_output(void)
 {
-    uint8_t reg = TCA9554_OUTPUT;
+    if (!tca9554_present) return 0;
     uint8_t val;
-    i2c_master_transmit(tca9554_dev, &reg, 1, 100);
-    i2c_master_receive(tca9554_dev, &val, 1, 100);
+    if (tca9554_safe_read(TCA9554_OUTPUT, &val) != ESP_OK) return 0;
     return val;
 }
 
@@ -51,6 +77,10 @@ static void tca9554_write_output(uint8_t val)
 
 void board_power_epd_on(void)
 {
+    if (!tca9554_present) {
+        ESP_LOGW(TAG, "TCA9554 absent, skipping EPD power");
+        return;
+    }
     uint8_t val = tca9554_read_output();
     val |= (1 << EXIO_EPD_PWR);
     tca9554_write_output(val);
@@ -59,18 +89,54 @@ void board_power_epd_on(void)
 
 void board_power_audio_on(void)
 {
-    uint8_t val = tca9554_read_output();
-    val |= (1 << EXIO_AUDIO_PWR) | (1 << EXIO_AMP_ENABLE);
+    if (!tca9554_present) {
+        gpio_set_direction(EXIO_AUDIO_PWR, GPIO_MODE_OUTPUT);
+        gpio_set_level(EXIO_AUDIO_PWR, 1);
+
+        gpio_set_direction(EXIO_AMP_ENABLE, GPIO_MODE_OUTPUT);
+        gpio_set_level(EXIO_AMP_ENABLE, 1);
+        ESP_LOGI(TAG, "Audio power ON (direct GPIO, no TCA9554)");
+        return;
+    }
+    // Write output directly without reading first (avoids I2C read failure)
+    uint8_t val = (1 << EXIO_AUDIO_PWR) | (1 << EXIO_AMP_ENABLE);
     tca9554_write_output(val);
     ESP_LOGI(TAG, "Audio power ON");
 }
 
+void board_power_audio_off(void)
+{
+    if (!tca9554_present) {
+        gpio_set_level(EXIO_AUDIO_PWR, 0);
+        gpio_set_level(EXIO_AMP_ENABLE, 0);
+        return;
+    }
+    uint8_t val = tca9554_read_output();
+    val &= ~((1 << EXIO_AUDIO_PWR) | (1 << EXIO_AMP_ENABLE));
+    tca9554_write_output(val);
+    ESP_LOGI(TAG, "Audio power OFF");
+}
+
 void board_power_vbat_on(void)
 {
+    if (!tca9554_present) {
+        ESP_LOGW(TAG, "TCA9554 absent, skipping VBAT power");
+        return;
+    }
     uint8_t val = tca9554_read_output();
     val |= (1 << EXIO_VBAT_PWR);
     tca9554_write_output(val);
     ESP_LOGI(TAG, "VBAT power ON");
+}
+
+bool system_tca9554_present(void)
+{
+    return tca9554_present;
+}
+
+void *get_i2c_bus_handle(void)
+{
+    return (void *)i2c_bus;
 }
 
 void system_init(void)
@@ -86,28 +152,52 @@ void system_init(void)
         .flags.enable_internal_pullup = true,
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus));
+    ESP_LOGI(TAG, "I2C bus initialized (SDA=%d SCL=%d)", I2C_SDA_GPIO, I2C_SCL_GPIO);
 
-    i2c_device_config_t tca_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = TCA9554_ADDR,
-        .scl_speed_hz = 400000,
-    };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &tca_cfg, &tca9554_dev));
+    ESP_LOGI(TAG, "Scanning I2C bus for PCA9554A/TCA9554...");
+    if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
+        tca9554_present = true;
+        ESP_LOGI(TAG, "PCA9554A (I/O expander) found at 0x3F");
+    } else if (i2c_probe(i2c_bus, TCA9554_ADDR_FB)) {
+        tca9554_present = true;
+        ESP_LOGI(TAG, "TCA9554 found at 0x38");
+    } else {
+        ESP_LOGW(TAG, "I/O expander NOT FOUND at 0x3F or 0x38 — e-paper power, audio amp, and charger detection disabled");
+    }
 
-    uint8_t config_val = 0xFF;
-    config_val &= ~(1 << EXIO_EPD_PWR);
-    config_val &= ~(1 << EXIO_AUDIO_PWR);
-    config_val &= ~(1 << EXIO_AMP_ENABLE);
-    config_val &= ~(1 << EXIO_LED);
-    config_val &= ~(1 << EXIO_VBAT_PWR);
-    tca9554_write_reg(TCA9554_CONFIG, config_val);
+    if (tca9554_present) {
+        const uint8_t tca_addr = i2c_probe(i2c_bus, PCA9554A_ADDR)
+                                     ? PCA9554A_ADDR : TCA9554_ADDR_FB;
+        i2c_device_config_t tca_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = tca_addr,
+            .scl_speed_hz = 400000,
+        };
+        esp_err_t add_ret = i2c_master_bus_add_device(i2c_bus, &tca_cfg, &tca9554_dev);
+        if (add_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add TCA9554 device: %s", esp_err_to_name(add_ret));
+            tca9554_present = false;
+        }
+    }
 
-    tca9554_write_output(0);
+    if (tca9554_present) {
+        uint8_t config_val = 0xFF;
+        config_val &= ~(1 << EXIO_EPD_PWR);
+        config_val &= ~(1 << EXIO_AUDIO_PWR);
+        config_val &= ~(1 << EXIO_AMP_ENABLE);
+        config_val &= ~(1 << EXIO_LED);
+        config_val &= ~(1 << EXIO_VBAT_PWR);
+        tca9554_write_reg(TCA9554_CONFIG, config_val);
 
-    board_power_epd_on();
-    board_power_audio_on();
-    vTaskDelay(pdMS_TO_TICKS(100));
-    board_power_vbat_on();
+        tca9554_write_output(0);
 
-    ESP_LOGI(TAG, "System initialized");
+        board_power_epd_on();
+        board_power_audio_on();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        board_power_vbat_on();
+
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
+    ESP_LOGI(TAG, "System initialized (I/O expander %s)", tca9554_present ? "present" : "absent");
 }

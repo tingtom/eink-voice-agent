@@ -29,13 +29,25 @@ static void draw_wifi_icon(int x, int y, bool connected)
     }
 }
 
+static void draw_offline_text(int x, int y)
+{
+    epaper_draw_text(x, y, "offline", 8);
+}
+
 static void draw_hermes_icon(int x, int y, bool connected)
 {
-    epaper_draw_text(x, y, "WS", 1);
-    if (!connected) {
-        for (int i = 0; i < 8; i++) {
-            epaper_draw_pixel(x + i, y + i, 0);
-        }
+    int s = 8;
+    if (connected) {
+        epaper_draw_rect(x, y, s, s, 1);
+        epaper_clear_rect(x + 1, y + 1, s - 2, s - 2);
+        epaper_draw_pixel(x + 2, y + 3, 0);
+        epaper_draw_pixel(x + 5, y + 3, 0);
+        epaper_draw_pixel(x + 3, y + 5, 0);
+        epaper_draw_pixel(x + 4, y + 5, 0);
+    } else {
+        epaper_draw_rect(x, y, s, s, 0);
+        epaper_draw_pixel(x + 2, y + 3, 1);
+        epaper_draw_pixel(x + 5, y + 3, 1);
     }
 }
 
@@ -48,18 +60,31 @@ static void draw_battery_icon(int x, int y, int pct)
     if (fill_w > 0) epaper_draw_rect(x + 1, y + 1, fill_w, bh - 2, 1);
 }
 
+void ui_draw_button_help(const char *top, const char *bottom)
+{
+    if (top) {
+        int tw = epaper_text_width(top, 8);
+        epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 24, top, 8);
+    }
+    if (bottom) {
+        int tw = epaper_text_width(bottom, 8);
+        epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 16, bottom, 8);
+    }
+}
+
 static void draw_status_bar(void)
 {
     int x = 2;
-    draw_wifi_icon(x, 2, wifi_ok);
+    draw_wifi_icon(x, 0, wifi_ok);
     x += 22;
-    draw_hermes_icon(x, 8, hermes_ok);
-    x += 12;
-    epaper_draw_text(x, 1, status_text, 8);
-    draw_battery_icon(DISPLAY_WIDTH - 52, 2, battery);
+    if (!hermes_ok) {
+        int tw = epaper_text_width("offline", 8);
+        draw_offline_text((DISPLAY_WIDTH - tw) / 2, 3);
+    }
+    draw_battery_icon(DISPLAY_WIDTH - 45, 3, battery);
     char pct[8];
     snprintf(pct, sizeof(pct), "%d%%", battery);
-    epaper_draw_text(DISPLAY_WIDTH - 30, 1, pct, 8);
+    epaper_draw_text(DISPLAY_WIDTH - 22, 4, pct, 8);
 }
 
 void ui_init(void)
@@ -71,29 +96,30 @@ void ui_init(void)
 void ui_show_boot_screen(const char *device_name)
 {
     epaper_clear();
-    int tw1 = epaper_text_width(device_name, 12);
+    int tw1 = epaper_text_width(device_name, 16);
     int tw2 = epaper_text_width("Connecting...", 12);
     int cx1 = (DISPLAY_WIDTH - tw1) / 2;
     int cx2 = (DISPLAY_WIDTH - tw2) / 2;
-    epaper_draw_text(cx1, DISPLAY_HEIGHT / 2 - 16, device_name, 12);
+    epaper_draw_text(cx1, DISPLAY_HEIGHT / 2 - 16, device_name, 16);
     epaper_draw_text(cx2, DISPLAY_HEIGHT / 2 + 8, "Connecting...", 12);
-    epaper_full_refresh();
+    epaper_partial_refresh();  // partial refresh to avoid battery brownout
 }
 
 void ui_show_home_screen(void)
 {
     epaper_clear();
     int tw1 = epaper_text_width("Say 'Hi Jeff'", 12);
-    int tw2 = epaper_text_width("or press SELECT", 12);
     epaper_draw_text((DISPLAY_WIDTH - tw1) / 2, 60, "Say 'Hi Jeff'", 12);
-    epaper_draw_text((DISPLAY_WIDTH - tw2) / 2, 80, "or press SELECT", 12);
     draw_status_bar();
-    epaper_full_refresh();
+    ui_draw_button_help("hold to listen", NULL);
+    epaper_partial_refresh();
 }
 
 void ui_show_menu(const char **items, int count, int selected)
 {
     epaper_clear();
+    int line_h = 16;
+    int start_y = (DISPLAY_HEIGHT - count * line_h) / 2;
     for (int i = 0; i < count; i++) {
         char line[32];
         if (i == selected) {
@@ -101,9 +127,16 @@ void ui_show_menu(const char **items, int count, int selected)
         } else {
             snprintf(line, sizeof(line), "  %s", items[i]);
         }
-        epaper_draw_text(10, 20 + i * 20, line, 12);
+        epaper_draw_text(10, start_y + i * line_h, line, 12);
     }
     draw_status_bar();
+    int tw;
+    tw = epaper_text_width("up -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 40, "up -", 8);
+    tw = epaper_text_width("sel -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 32, "sel -", 8);
+    tw = epaper_text_width("down -", 8);
+    epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 16, "down -", 8);
     epaper_partial_refresh();
 }
 
@@ -115,10 +148,11 @@ void ui_show_recording_screen(void)
     epaper_clear();
     int tw = epaper_text_width("Listening...", 12);
     epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 55, "Listening...", 12);
-    epaper_draw_text(10, DISPLAY_HEIGHT - 16, "long SELECT=cancel", 8);
     draw_status_bar();
+    ui_draw_button_help("cancel -", NULL);
     epaper_partial_refresh();
     recording_frame = 0;
+    for (int i = 0; i < 12; i++) prev_heights[i] = 0;
 }
 
 void ui_update_recording_viz(int32_t energy)
@@ -133,8 +167,7 @@ void ui_update_recording_viz(int32_t energy)
 
     for (int i = 0; i < bar_count; i++) {
         float t = (float)(i + 1) / bar_count;
-        // Scale: energy ~100-2000, want h up to 40
-        int h = (int)((energy * max_h * t) / 2000);
+        int h = (int)((energy * max_h * t) / 500);
         if (h < 2) h = 2;
         if (h > max_h) h = max_h;
 
@@ -148,13 +181,6 @@ void ui_update_recording_viz(int32_t energy)
         prev_heights[i] = h;
     }
 
-    // Clear prev_heights when energy is very low (silence)
-    if (energy < 100) {
-        for (int i = 0; i < bar_count; i++) {
-            prev_heights[i] = 0;
-        }
-    }
-
     epaper_partial_refresh();
 }
 
@@ -164,6 +190,7 @@ void ui_show_processing_screen(void)
     int tw = epaper_text_width("Thinking...", 16);
     epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 25, "Thinking...", 16);
     draw_status_bar();
+    ui_draw_button_help("cancel -", NULL);
     epaper_partial_refresh();
 }
 
@@ -171,11 +198,14 @@ void ui_update_processing_anim(int frame)
 {
     int cx = DISPLAY_WIDTH / 2;
     int cy = 85;
-    int sizes[] = {6, 10, 14, 18, 22, 18, 14, 10};
+    int sizes[] = {8, 12, 16, 20, 24, 20, 16, 12};
     int s = sizes[frame % 8];
 
-    epaper_draw_rect(cx - 24, cy - 24, 48, 48, 0);
+    epaper_clear_rect(cx - 24, cy - 24, 48, 48);
     epaper_draw_rect(cx - s, cy - s, s * 2, s * 2, 1);
+    if (s > 8) {
+        epaper_clear_rect(cx - s + 4, cy - s + 4, (s - 4) * 2, (s - 4) * 2);
+    }
     epaper_partial_refresh();
 }
 
@@ -183,8 +213,8 @@ void ui_show_response(const char *text)
 {
     epaper_clear();
     epaper_draw_text(10, 20, text, 12);
-    epaper_draw_text(10, DISPLAY_HEIGHT - 20, "SELECT=back", 8);
     draw_status_bar();
+    ui_draw_button_help(NULL, "back -");
     epaper_partial_refresh();
 }
 
@@ -193,6 +223,7 @@ void ui_show_error(const char *message)
     epaper_clear();
     epaper_draw_text(10, 60, "Error:", 16);
     epaper_draw_text(10, 80, message, 12);
+    ui_draw_button_help(NULL, "back -");
     epaper_full_refresh();
 }
 
@@ -204,6 +235,7 @@ void ui_show_provisioning_screen(const char *ap_name, const char *url)
     epaper_draw_text(10, 73, ap_name, 8);
     epaper_draw_text(10, 90, "Then open:", 12);
     epaper_draw_text(10, 108, url, 12);
+    ui_draw_button_help("up -", "down -");
     epaper_full_refresh();
 }
 
@@ -231,7 +263,8 @@ void ui_show_docked_screen(void)
     snprintf(pct, sizeof(pct), "%d%%", battery);
     int tw2 = epaper_text_width(pct, 16);
     epaper_draw_text((DISPLAY_WIDTH - tw2) / 2, 88, pct, 16);
-    epaper_full_refresh();
+    ui_draw_button_help("hold to exit", NULL);
+    epaper_partial_refresh();
 }
 
 static void draw_moon_icon(int x, int y)
@@ -257,6 +290,7 @@ void ui_show_sleep_screen(void)
     epaper_clear();
     draw_moon_icon(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2 - 10);
     epaper_draw_text(DISPLAY_WIDTH / 2 - 30, DISPLAY_HEIGHT / 2 + 10, "Sleeping...", 12);
+    ui_draw_button_help(NULL, "wake -");
     epaper_full_refresh();
 }
 
@@ -280,6 +314,11 @@ void ui_update_wifi_status(bool connected)
 void ui_update_hermes_status(bool connected)
 {
     hermes_ok = connected;
+}
+
+bool ui_is_hermes_connected(void)
+{
+    return hermes_ok;
 }
 
 void ui_set_status_text(const char *text)

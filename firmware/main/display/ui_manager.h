@@ -19,4 +19,6 @@ void ui_update_status_bar(bool wifi_connected, bool hermes_connected, uint8_t ba
 void ui_update_battery(uint8_t pct);
 void ui_update_wifi_status(bool connected);
 void ui_update_hermes_status(bool connected);
+bool ui_is_hermes_connected(void);
 void ui_set_status_text(const char *text);
+void ui_draw_button_help(const char *top, const char *bottom);

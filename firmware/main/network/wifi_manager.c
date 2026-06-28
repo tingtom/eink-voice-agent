@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_netif.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
@@ -19,6 +20,8 @@ static EventGroupHandle_t wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
 static int8_t current_rssi = -100;
 static bool connected = false;
+static char current_ip[16] = {0};
+static int reconnect_attempts = 0;
 
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -28,13 +31,15 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         connected = false;
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        memset(current_ip, 0, sizeof(current_ip));
         ESP_LOGW(TAG, "WiFi disconnected, reconnecting...");
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
         connected = true;
         current_rssi = 0;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        snprintf(current_ip, sizeof(current_ip), IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Got IP: %s", current_ip);
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -95,6 +100,11 @@ int8_t wifi_get_rssi(void)
         current_rssi = ap.rssi;
     }
     return current_rssi;
+}
+
+char *wifi_get_ip(void)
+{
+    return current_ip;
 }
 
 esp_err_t wifi_save_creds(const char *ssid, const char *password)
