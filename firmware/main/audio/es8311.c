@@ -128,7 +128,10 @@ esp_err_t es8311_prealloc_i2s(void)
 {
     if (g_tx && g_rx && g_i2s_hw_inited) return ESP_OK;
     if (!get_i2c_bus_handle()) i2c_bus_init();
-    board_power_audio_on();
+    // NOTE: audio power is NOT toggled here — doing so would set GPIO1/3 as
+    // outputs in the no-TCA path, corrupting the GPIO bank shared with
+    // BUTTON_PWR (GPIO2).  board_power_audio_on() is called inside
+    // es8311_init() after WiFi init.
 
     esp_err_t ret = es8311_i2s_alloc();
     if (ret != ESP_OK) return ret;
