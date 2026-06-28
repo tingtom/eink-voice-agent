@@ -120,14 +120,27 @@ static void es8311_i2s_deinit(void)
     }
 }
 
-// Pre-allocate I2S DMA buffers without programming I2S hardware.
-// Call before WiFi init so DMA descriptors land before WiFi's RX pool.
+// Pre-allocate I2S DMA buffers AND program peripheral BEFORE WiFi init,
+// so DMA descriptors land before WiFi's RX pool. Immediately disable the
+// channels so MCLK / BCLK / WS don't produce toggling outputs during
+// WiFi RF calibration.  Re-enable happens inside esp_codec_dev_open().
 esp_err_t es8311_prealloc_i2s(void)
 {
-    if (g_tx && g_rx) return ESP_OK;
+    if (g_tx && g_rx && g_i2s_hw_inited) return ESP_OK;
     if (!get_i2c_bus_handle()) i2c_bus_init();
     board_power_audio_on();
-    return es8311_i2s_alloc();
+
+    esp_err_t ret = es8311_i2s_alloc();
+    if (ret != ESP_OK) return ret;
+    ret = es8311_i2s_hw_init();
+    if (ret != ESP_OK) return ret;
+
+    // Disable channels so clock outputs stay silent during WiFi init.
+    // DMA descriptors persist — they are freed only in i2s_del_channel().
+    i2s_channel_disable(g_tx);
+    i2s_channel_disable(g_rx);
+
+    return ESP_OK;
 }
 
 esp_err_t es8311_init(void)
@@ -153,6 +166,8 @@ esp_err_t es8311_init(void)
         ESP_LOGE(TAG, "I2S init failed: %s", esp_err_to_name(ret));
         return ret;
     }
+    // If pre-alloc ran, channels were disabled to keep MCLK silent during
+    // WiFi init.  esp_codec_dev_open() (called below) will re-enable them.
 
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = I2C_PORT,
