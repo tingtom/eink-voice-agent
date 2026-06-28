@@ -19,18 +19,25 @@ static i2s_chan_handle_t g_rx = NULL;
 static const audio_codec_ctrl_if_t *g_ctrl_if = NULL;
 static const audio_codec_data_if_t *g_data_if = NULL;
 static const audio_codec_if_t *g_codec_if = NULL;
+static bool g_es8311_inited = false;
 
 static esp_err_t es8311_i2s_init(void)
 {
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 2,
-        .dma_frame_num = 128,
+        .dma_desc_num = 4,
+        .dma_frame_num = 64,
         .auto_clear = true,
     };
 
     i2s_chan_handle_t tx = NULL, rx = NULL;
+    esp_err_t ret = i2s_new_channel(&chan_cfg, &tx, &rx);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_new_channel failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
             .sample_rate_hz = AUDIO_SAMPLE_RATE,
@@ -58,9 +65,21 @@ static esp_err_t es8311_i2s_init(void)
         },
     };
 
-    i2s_new_channel(&chan_cfg, &tx, &rx);
-    i2s_channel_init_std_mode(rx, &std_cfg);
-    i2s_channel_init_std_mode(tx, &std_cfg);
+    ret = i2s_channel_init_std_mode(rx, &std_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_channel_init_std_mode(rx) failed: %s", esp_err_to_name(ret));
+        i2s_del_channel(tx);
+        i2s_del_channel(rx);
+        return ret;
+    }
+
+    ret = i2s_channel_init_std_mode(tx, &std_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_channel_init_std_mode(tx) failed: %s", esp_err_to_name(ret));
+        i2s_del_channel(tx);
+        i2s_del_channel(rx);
+        return ret;
+    }
 
     g_tx = tx;
     g_rx = rx;
@@ -82,6 +101,11 @@ static void es8311_i2s_deinit(void)
 
 esp_err_t es8311_init(void)
 {
+    if (g_es8311_inited) {
+        ESP_LOGD(TAG, "Already initialized, skipping");
+        return ESP_OK;
+    }
+
     void *bus = get_i2c_bus_handle();
     if (!bus) {
         ESP_LOGE(TAG, "I2C bus not initialized — call i2c_bus_init() first");
@@ -215,6 +239,7 @@ esp_err_t es8311_init(void)
     esp_codec_set_disable_when_closed(g_playback_handle, false);
     esp_codec_set_disable_when_closed(g_record_handle, false);
 
+    g_es8311_inited = true;
     ESP_LOGI(TAG, "ES8311 initialized (esp_codec_dev, %d Hz, mono 16-bit)", AUDIO_SAMPLE_RATE);
     return ESP_OK;
 
@@ -243,6 +268,8 @@ void es8311_set_volume(uint8_t vol)
 
 void es8311_deinit(void)
 {
+    if (!g_es8311_inited) return;
+    g_es8311_inited = false;
     if (g_record_handle) {
         esp_codec_dev_close(g_record_handle);
         esp_codec_dev_delete(g_record_handle);
