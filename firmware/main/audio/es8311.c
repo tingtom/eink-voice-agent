@@ -1,8 +1,11 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_check.h"
+#include "esp_codec_dev.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "app_config.h"
 #include "system_init.h"
 
@@ -207,8 +210,9 @@ static esp_err_t es8311_i2s_config(void)
     return ESP_OK;
 }
 
-esp_err_t es8311_init(void)
+esp_err_t es8311_init(i2s_chan_handle_t tx_handle)
 {
+    (void)tx_handle;
     esp_err_t ret;
 
     void *bus_handle = get_i2c_bus_handle();
@@ -273,4 +277,9 @@ void es8311_deinit(void)
         i2c_master_bus_rm_device(es8311_i2c_dev);
         es8311_i2c_dev = NULL;
     }
+}
+
+esp_codec_dev_handle_t es8311_get_handle(void)
+{
+    return NULL;
 }

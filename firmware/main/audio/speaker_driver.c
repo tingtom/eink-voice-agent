@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "driver/gpio.h"
 #include "esp_codec_dev.h"
 #include "app_config.h"
 #include "es8311.h"
@@ -192,10 +193,17 @@ esp_err_t speaker_play_tone(int freq_hz, int duration_ms)
     es8311_set_volume(100);
     audio_pipeline_set_playback_active(true);
 
-    uint8_t r = 0;
+    int r = 0, r31 = 0, r32 = 0;
+    esp_codec_dev_handle_t h = es8311_get_handle();
     ESP_LOGI(TAG, "GPIO3 (AMP_EN) level=%d", gpio_get_level(GPIO_NUM_3));
-    ESP_LOGI(TAG, "ES8311 regs: 0x0C=0x%02X 0x31=0x%02X 0x32=0x%02X",
-             es8311_read_reg(0x0C, &r)?0:r, es8311_read_reg(0x31, &r)?0:r, es8311_read_reg(0x32, &r)?0:r);
+    if (h) {
+        esp_codec_dev_read_reg(h, 0x0C, &r);
+        esp_codec_dev_read_reg(h, 0x31, &r31);
+        esp_codec_dev_read_reg(h, 0x32, &r32);
+        ESP_LOGI(TAG, "ES8311 regs: 0x0C=0x%02X 0x31=0x%02X 0x32=0x%02X", r, r31, r32);
+    } else {
+        ESP_LOGW(TAG, "ES8311 handle NULL, cannot read regs");
+    }
 
     int sample_rate = AUDIO_SAMPLE_RATE;
     int total_samples = (sample_rate * duration_ms) / 1000;
