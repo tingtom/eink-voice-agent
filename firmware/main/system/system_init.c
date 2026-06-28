@@ -112,14 +112,13 @@ static void tca9554_write_output(uint8_t val)
 }
 
 /* ------------------------------------------------------------------ */
-/* Optional: Enable MICBIAS on ES8311 (I2C address 0x18)              */
-static void es8311_enable_micbias(void)
+/* Optional: Configure ES8311 for microphone input                    */
+static void es8311_mic_init(void)
 {
     /* Wait a bit for the codec to power up after enabling AUDIO_PWR */
     vTaskDelay(pdMS_TO_TICKS(10));
 
     const uint8_t ES8311_ADDR = 0x18;
-    const uint8_t REG_POWER_MGMT = 0x02; /* Assuming Power Management register */
     i2c_master_dev_handle_t es8311_dev = NULL;
     esp_err_t ret;
 
@@ -129,32 +128,64 @@ static void es8311_enable_micbias(void)
         .device_address = ES8311_ADDR,
         .scl_speed_hz = 400000,
     };
-    esp_err_t add_ret = i2c_master_bus_add_device(i2c_bus, &es8311_cfg, &es8311_dev);
-    if (add_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add ES8311 device: %s", esp_err_to_name(add_ret));
+    ret = i2c_master_bus_add_device(i2c_bus, &es8311_cfg, &es8311_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to add ES8311 I2C device: %s", esp_err_to_name(ret));
         return;
     }
 
-    /* Read current value of Power Management register */
-    uint8_t reg = REG_POWER_MGMT;
+    /* 1. Power Management: Enable MICBIAS and ADC */
+    /* Assuming register 0x02: bit0 MICBIAS, bit1 ADCREN */
+    uint8_t reg = 0x02;
     uint8_t val = 0;
     ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", REG_POWER_MGMT, esp_err_to_name(ret));
-        goto cleanup;
-    }
-    /* Set MICBIAS enable bit (assuming bit0) */
-    val |= 0x01;
-    /* Write back */
-    uint8_t tx[2] = { REG_POWER_MGMT, val };
-    ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", REG_POWER_MGMT, esp_err_to_name(ret));
+    if (ret == ESP_OK) {
+        val |= (1 << 0) | (1 << 1); /* MICBIAS + ADCREN */
+        uint8_t tx[2] = { reg, val };
+        ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "ES8311: MICBIAS and ADC enabled");
+        } else {
+            ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
+        }
     } else {
-        ESP_LOGI(TAG, "ES8311 MICBIAS enabled");
+        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
     }
 
-cleanup:
+    /* 2. Set ADC input to MIC1 (assuming register 0x04, bits 1:0 = 01 for MIC1) */
+    reg = 0x04;
+    ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
+    if (ret == ESP_OK) {
+        val &= ~(0x03); /* Clear input select bits */
+        val |= 0x01;    /* MIC1 selected */
+        uint8_t tx[2] = { reg, val };
+        ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "ES8311: ADC input set to MIC1");
+        } else {
+            ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
+    }
+
+    /* 3. Set ADC volume to a reasonable level (e.g., 0x0F for mid gain) */
+    reg = 0x05; /* Assuming ADC volume register */
+    ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
+    if (ret == ESP_OK) {
+        val = 0x0F; /* Example mid gain */
+        uint8_t tx[2] = { reg, val };
+        ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "ES8311: ADC volume set");
+        } else {
+            ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
+    }
+
+    /* Remove temporary device handle */
     i2c_master_bus_rm_device(es8311_dev);
 }
 
@@ -289,8 +320,8 @@ void system_init(void)
     gpio_set_level(EXIO_EPD_PWR, 1);
     ESP_LOGI(TAG, "Turning on audio power");
     gpio_set_level(EXIO_AUDIO_PWR, 1);
-    /* Enable MICBIAS on ES8311 after powering the audio block */
-    es8311_enable_micbias();
+    /* Configure ES8311 for microphone input */
+    es8311_mic_init();
     ESP_LOGI(TAG, "Turning on VBAT power");
     gpio_set_level(EXIO_VBAT_PWR, 1);
 }
