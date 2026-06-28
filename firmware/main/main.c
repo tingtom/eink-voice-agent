@@ -676,6 +676,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Stage 7 OK: WiFi creds loaded");
     bod_save_stage("wifi_start");
 
+    // Init audio DMA buffers before WiFi (WiFi consumes ~17KB of DMA heap
+    // for static RX buffers, leaving insufficient contiguous DMA memory).
+    i2c_bus_init();
+    es8311_init();
+
     wifi_init();
     esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
@@ -701,11 +706,6 @@ void app_main(void)
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Stage 10 OK: WiFi connected (%s)", wifi_get_ip());
         bod_save_stage("wifi_connected");
-
-        // Init audio hardware before Hermes auth so I2S DMA buffers are
-        // allocated before the TLS handshake can fragment the heap.
-        i2c_bus_init();
-        es8311_init();
 
         ESP_LOGI(TAG, "Stage 11: Authenticating with Hermes server...");
         char auth_url[128];
