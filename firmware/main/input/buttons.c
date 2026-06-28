@@ -32,8 +32,17 @@ static void buttons_scan_task(void *arg)
 {
     (void)arg;
     TickType_t last_wake = xTaskGetTickCount();
+    int loop = 0;
 
     while (1) {
+        loop++;
+        // Log raw GPIO levels every ~100 iterations (~3s) for debugging
+        if (loop % 100 == 0) {
+            int l0 = gpio_get_level(button_gpios[0]);
+            int l1 = gpio_get_level(button_gpios[1]);
+            ESP_LOGI(TAG, "heartbeat gpio[0]=%d gpio[1]=%d", l0, l1);
+        }
+
         for (int i = 0; i < BUTTON_COUNT; i++) {
             if (button_gpios[i] < 0) continue;
 
@@ -81,7 +90,7 @@ void buttons_init(void)
         };
         gpio_config(&io);
     }
-    xTaskCreate(buttons_scan_task, "buttons", 4096, NULL, 10, NULL);
+    xTaskCreate(buttons_scan_task, "buttons", 8192, NULL, 10, NULL);
     ESP_LOGI(TAG, "Buttons initialized");
 }
 
