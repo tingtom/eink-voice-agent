@@ -11,15 +11,20 @@ static const char *TAG = "SYSTEM";
 #define PCA9555_ADDR        0x20    /* PCA9555 16-bit I/O expander on Waveshare board */
 #define PCA9554A_ADDR       0x3F    /* fallback: PCA9554A 8-bit variant */
 #define TCA9554_ADDR_FB     0x38    /* fallback: TCA9554 */
-#define TCA9554_INPUT        0x00
+#define TCA9554_INPUT        0x00    /* shared across all variants */
+/* PCA9554A/TCA9554 register map */
 #define TCA9554_OUTPUT       0x01
 #define TCA9554_CONFIG       0x03
+/* PCA9555 register map: different output/config registers */
+#define PCA9555_OUTPUT       0x02
+#define PCA9555_CONFIG       0x06
 #define TCA9554_PROBE_TIMEOUT 50
 #define TCA9554_XFER_TIMEOUT  100
 
 static i2c_master_bus_handle_t i2c_bus = NULL;
 static i2c_master_dev_handle_t tca9554_dev = NULL;
 static bool tca9554_present = false;
+static bool is_pca9555 = false;  /* PCA9555 uses different register map */
 
 static bool i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr)
 {
@@ -55,6 +60,9 @@ static void tca9554_write_reg(uint8_t reg, uint8_t val)
     tca9554_safe_write_reg(reg, val);
 }
 
+static uint8_t get_output_reg(void) { return is_pca9555 ? PCA9555_OUTPUT : TCA9554_OUTPUT; }
+static uint8_t get_config_reg(void) { return is_pca9555 ? PCA9555_CONFIG : TCA9554_CONFIG; }
+
 uint8_t tca9554_read_input(void)
 {
     if (!tca9554_present) return 0xFF;
@@ -67,13 +75,13 @@ static uint8_t tca9554_read_output(void)
 {
     if (!tca9554_present) return 0;
     uint8_t val;
-    if (tca9554_safe_read(TCA9554_OUTPUT, &val) != ESP_OK) return 0;
+    if (tca9554_safe_read(get_output_reg(), &val) != ESP_OK) return 0;
     return val;
 }
 
 static void tca9554_write_output(uint8_t val)
 {
-    tca9554_write_reg(TCA9554_OUTPUT, val);
+    tca9554_write_reg(get_output_reg(), val);
 }
 
 void board_power_epd_on(void)
@@ -193,6 +201,7 @@ void system_init(void)
     }
     if (i2c_probe(i2c_bus, PCA9555_ADDR)) {
         tca9554_present = true;
+        is_pca9555 = true;
         ESP_LOGI(TAG, "PCA9555 (I/O expander) found at 0x%02X", PCA9555_ADDR);
     } else if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
         tca9554_present = true;
@@ -231,7 +240,7 @@ void system_init(void)
         config_val &= ~(1 << EXIO_AMP_ENABLE);
         config_val &= ~(1 << EXIO_LED);
         config_val &= ~(1 << EXIO_VBAT_PWR);
-        tca9554_write_reg(TCA9554_CONFIG, config_val);
+        tca9554_write_reg(get_config_reg(), config_val);
 
         tca9554_write_output(0);
 
