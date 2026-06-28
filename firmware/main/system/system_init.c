@@ -165,18 +165,19 @@ void system_init(void)
     ESP_LOGI(TAG, "Scanning I2C bus for PCA9554A/TCA9554...");
     // Scan entire bus and log all responding addresses for debug
     for (uint8_t addr = 1; addr < 127; addr++) {
-        if (i2c_master_probe(i2c_bus, addr, pdMS_TO_TICKS(10)) == ESP_OK) {
+        if (i2c_master_probe(i2c_bus, addr, 50) == ESP_OK) {
             ESP_LOGI(TAG, "  I2C device found at 0x%02X", addr);
         }
     }
     if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
         tca9554_present = true;
-        ESP_LOGI(TAG, "PCA9554A (I/O expander) found at 0x3F");
+        ESP_LOGI(TAG, "PCA9554A (I/O expander) found at 0x%02X", PCA9554A_ADDR);
     } else if (i2c_probe(i2c_bus, TCA9554_ADDR_FB)) {
         tca9554_present = true;
-        ESP_LOGI(TAG, "TCA9554 found at 0x38");
+        ESP_LOGI(TAG, "TCA9554 found at 0x%02X", TCA9554_ADDR_FB);
     } else {
-        ESP_LOGW(TAG, "I/O expander NOT FOUND at 0x3F or 0x38 — e-paper power, audio amp, and charger detection disabled");
+        ESP_LOGW(TAG, "I/O expander NOT FOUND at 0x%02X or 0x%02X — audio amp, e-paper power, charger detection disabled",
+                 PCA9554A_ADDR, TCA9554_ADDR_FB);
     }
 
     if (tca9554_present) {
