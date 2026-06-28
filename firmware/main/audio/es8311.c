@@ -99,12 +99,19 @@ static void es8311_i2s_deinit(void)
     }
 }
 
+// Pre-allocate I2S DMA channels (no peripheral enable).
+// Call before WiFi init so DMA buffers aren't blocked by WiFi's RX pool.
+esp_err_t es8311_prealloc_i2s(void)
+{
+    if (g_tx && g_rx) return ESP_OK;
+    if (!get_i2c_bus_handle()) i2c_bus_init();
+    board_power_audio_on();
+    return es8311_i2s_init();
+}
+
 esp_err_t es8311_init(void)
 {
-    if (g_es8311_inited) {
-        ESP_LOGD(TAG, "Already initialized, skipping");
-        return ESP_OK;
-    }
+    if (g_es8311_inited) return ESP_OK;
 
     void *bus = get_i2c_bus_handle();
     if (!bus) {
@@ -114,7 +121,10 @@ esp_err_t es8311_init(void)
 
     board_power_audio_on();
 
-    esp_err_t ret = es8311_i2s_init();
+    esp_err_t ret = ESP_OK;
+    if (!g_tx || !g_rx) {
+        ret = es8311_i2s_init();
+    }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed: %s", esp_err_to_name(ret));
         return ret;

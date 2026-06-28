@@ -680,12 +680,11 @@ void app_main(void)
     esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
 
-    // Allocate I2S DMA buffers between wifi_init and wifi_connect.
-    // wifi_init creates control structures (small), wifi_connect calls
-    // esp_wifi_start which allocates ~17KB of static DMA RX buffers.
-    // I2S needs its ~4KB of DMA before that pool is consumed.
+    // Pre-allocate I2S DMA channels before wifi_connect claims the
+    // DMA heap with ~17KB of static RX buffers. Only channel creation
+    // (no peripheral enable) — avoids MCLK noise during WiFi RF calibration.
     i2c_bus_init();
-    es8311_init();
+    es8311_prealloc_i2s();
 
     // On battery: cap WiFi TX power to reduce peak-current brownout risk.
     // esp_wifi_set_max_tx_power value is in 0.25dBm units; default is ~78 (+19.5dBm).
