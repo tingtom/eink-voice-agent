@@ -157,6 +157,27 @@ void i2c_bus_init(void)
     ESP_LOGI(TAG, "I2C bus initialized (SDA=%d SCL=%d)", I2C_SDA_GPIO, I2C_SCL_GPIO);
 }
 
+void i2c_bus_scan(void)
+{
+    if (!i2c_bus) {
+        ESP_LOGW(TAG, "I2C bus not initialized, cannot scan");
+        return;
+    }
+    ESP_LOGI(TAG, "=== I2C bus scan ===");
+    int found = 0;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        if (i2c_master_probe(i2c_bus, addr, 50) == ESP_OK) {
+            ESP_LOGI(TAG, "  I2C device found at 0x%02X", addr);
+            found++;
+        }
+    }
+    if (found == 0) {
+        ESP_LOGW(TAG, "  No I2C devices found!");
+    } else {
+        ESP_LOGI(TAG, "  %d device(s) found", found);
+    }
+}
+
 void system_init(void)
 {
     ESP_LOGI(TAG, "Initializing system...");

@@ -735,6 +735,7 @@ void app_main(void)
 
     // Audio + buttons init runs regardless of WiFi status.
     ESP_LOGI(TAG, "Stage 12: Finalizing audio + buttons...");
+    i2c_bus_scan();
     recordings_init_audio();
     // Buttons must be created BEFORE audio_pipeline_init() which allocates the
     // 162KB TFLite arena and exhausts the heap, leaving no room for task stacks.
