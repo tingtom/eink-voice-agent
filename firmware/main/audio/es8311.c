@@ -20,9 +20,14 @@ static const audio_codec_ctrl_if_t *g_ctrl_if = NULL;
 static const audio_codec_data_if_t *g_data_if = NULL;
 static const audio_codec_if_t *g_codec_if = NULL;
 static bool g_es8311_inited = false;
+static bool g_i2s_hw_inited = false;  // tracks whether i2s_channel_init_std_mode has been called
 
-static esp_err_t es8311_i2s_init(void)
+// Allocate I2S channel handles + DMA buffers WITHOUT programming the peripheral.
+// Safe to call before WiFi init (does not touch shared PLL/clock tree).
+static esp_err_t es8311_i2s_alloc(void)
 {
+    if (g_tx && g_rx) return ESP_OK;
+
     i2s_chan_config_t chan_cfg = {
         .id = I2S_PORT,
         .role = I2S_ROLE_MASTER,
@@ -36,6 +41,22 @@ static esp_err_t es8311_i2s_init(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "i2s_new_channel failed: %s", esp_err_to_name(ret));
         return ret;
+    }
+
+    g_tx = tx;
+    g_rx = rx;
+    g_i2s_hw_inited = false;
+    return ESP_OK;
+}
+
+// Program I2S peripheral registers (GPIO matrix, clock tree, format).
+// Must be called AFTER WiFi init to avoid breaking WiFi RF.
+static esp_err_t es8311_i2s_hw_init(void)
+{
+    if (g_i2s_hw_inited) return ESP_OK;
+    if (!g_tx || !g_rx) {
+        ESP_LOGE(TAG, "I2S channels not allocated — call es8311_i2s_alloc first");
+        return ESP_ERR_INVALID_STATE;
     }
 
     i2s_std_config_t std_cfg = {
@@ -65,29 +86,29 @@ static esp_err_t es8311_i2s_init(void)
         },
     };
 
-    ret = i2s_channel_init_std_mode(rx, &std_cfg);
+    esp_err_t ret = i2s_channel_init_std_mode(g_rx, &std_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "i2s_channel_init_std_mode(rx) failed: %s", esp_err_to_name(ret));
-        i2s_del_channel(tx);
-        i2s_del_channel(rx);
         return ret;
     }
 
-    ret = i2s_channel_init_std_mode(tx, &std_cfg);
+    ret = i2s_channel_init_std_mode(g_tx, &std_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "i2s_channel_init_std_mode(tx) failed: %s", esp_err_to_name(ret));
-        i2s_del_channel(tx);
-        i2s_del_channel(rx);
+        i2s_del_channel(g_tx);
+        i2s_del_channel(g_rx);
+        g_tx = NULL;
+        g_rx = NULL;
         return ret;
     }
 
-    g_tx = tx;
-    g_rx = rx;
+    g_i2s_hw_inited = true;
     return ESP_OK;
 }
 
 static void es8311_i2s_deinit(void)
 {
+    g_i2s_hw_inited = false;
     if (g_tx) {
         i2s_channel_disable(g_tx);
         i2s_del_channel(g_tx);
@@ -99,14 +120,14 @@ static void es8311_i2s_deinit(void)
     }
 }
 
-// Pre-allocate I2S DMA channels (no peripheral enable).
-// Call before WiFi init so DMA buffers aren't blocked by WiFi's RX pool.
+// Pre-allocate I2S DMA buffers without programming I2S hardware.
+// Call before WiFi init so DMA descriptors land before WiFi's RX pool.
 esp_err_t es8311_prealloc_i2s(void)
 {
     if (g_tx && g_rx) return ESP_OK;
     if (!get_i2c_bus_handle()) i2c_bus_init();
     board_power_audio_on();
-    return es8311_i2s_init();
+    return es8311_i2s_alloc();
 }
 
 esp_err_t es8311_init(void)
@@ -123,7 +144,10 @@ esp_err_t es8311_init(void)
 
     esp_err_t ret = ESP_OK;
     if (!g_tx || !g_rx) {
-        ret = es8311_i2s_init();
+        ret = es8311_i2s_alloc();
+    }
+    if (ret == ESP_OK && !g_i2s_hw_inited) {
+        ret = es8311_i2s_hw_init();
     }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed: %s", esp_err_to_name(ret));

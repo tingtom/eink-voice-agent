@@ -32,11 +32,12 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         connected = false;
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         memset(current_ip, 0, sizeof(current_ip));
+        wifi_event_sta_disconnected_t *discon = (wifi_event_sta_disconnected_t *)data;
         if (wifi_reconnect_allowed) {
-            ESP_LOGW(TAG, "WiFi disconnected, reconnecting...");
+            ESP_LOGW(TAG, "WiFi disconnected (reason %d), reconnecting...", discon->reason);
             esp_wifi_connect();
         } else {
-            ESP_LOGI(TAG, "WiFi disconnected — reconnects disabled");
+            ESP_LOGI(TAG, "WiFi disconnected (reason %d) — reconnects disabled", discon->reason);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
@@ -71,6 +72,10 @@ void wifi_connect(const char *ssid, const char *password)
         .sta = {
             .threshold = {
                 .authmode = WIFI_AUTH_WPA2_PSK,
+            },
+            .pmf_cfg = {
+                .capable = false,
+                .required = false,
             },
         },
     };

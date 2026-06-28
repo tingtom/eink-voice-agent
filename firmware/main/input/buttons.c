@@ -72,9 +72,14 @@ void buttons_init(void)
 {
     for (int i = 0; i < BUTTON_COUNT; i++) {
         if (button_gpios[i] < 0) continue;
-        gpio_reset_pin(button_gpios[i]);
-        gpio_set_direction(button_gpios[i], GPIO_MODE_INPUT);
-        gpio_set_pull_mode(button_gpios[i], GPIO_PULLUP_ONLY);
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << button_gpios[i],
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = 1,
+            .pull_down_en = 0,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io);
     }
     xTaskCreate(buttons_scan_task, "buttons", 4096, NULL, 10, NULL);
     ESP_LOGI(TAG, "Buttons initialized");

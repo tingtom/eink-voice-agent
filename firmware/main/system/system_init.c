@@ -98,8 +98,9 @@ void board_power_audio_on(void)
         ESP_LOGI(TAG, "Audio power ON (direct GPIO, no TCA9554)");
         return;
     }
-    // Write output directly without reading first (avoids I2C read failure)
-    uint8_t val = (1 << EXIO_AUDIO_PWR) | (1 << EXIO_AMP_ENABLE);
+    // Read-modify-write to avoid clobbering other bits (EPD_PWR, VBAT_PWR, LED).
+    uint8_t val = tca9554_read_output();
+    val |= (1 << EXIO_AUDIO_PWR) | (1 << EXIO_AMP_ENABLE);
     tca9554_write_output(val);
     ESP_LOGI(TAG, "Audio power ON");
 }
