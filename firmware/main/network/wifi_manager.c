@@ -21,7 +21,7 @@ static const int WIFI_CONNECTED_BIT = BIT0;
 static int8_t current_rssi = -100;
 static bool connected = false;
 static char current_ip[16] = {0};
-static int reconnect_attempts = 0;
+static bool wifi_reconnect_allowed = true;
 
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -32,8 +32,12 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         connected = false;
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         memset(current_ip, 0, sizeof(current_ip));
-        ESP_LOGW(TAG, "WiFi disconnected, reconnecting...");
-        esp_wifi_connect();
+        if (wifi_reconnect_allowed) {
+            ESP_LOGW(TAG, "WiFi disconnected, reconnecting...");
+            esp_wifi_connect();
+        } else {
+            ESP_LOGI(TAG, "WiFi disconnected — reconnects disabled");
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
         connected = true;
@@ -90,6 +94,12 @@ void wifi_disconnect(void)
     esp_wifi_disconnect();
     connected = false;
     xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+}
+
+void wifi_stop_reconnect(void)
+{
+    wifi_reconnect_allowed = false;
+    esp_wifi_stop();
 }
 
 int8_t wifi_get_rssi(void)

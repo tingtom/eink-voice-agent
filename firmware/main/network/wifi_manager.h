@@ -6,6 +6,7 @@ void wifi_init(void);
 void wifi_connect(const char *ssid, const char *password);
 bool wifi_is_connected(void);
 void wifi_disconnect(void);
+void wifi_stop_reconnect(void);
 int8_t wifi_get_rssi(void);
 char *wifi_get_ip(void);
 

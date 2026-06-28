@@ -730,6 +730,7 @@ void app_main(void)
         bod_save_stage("hermes_auth");
     } else {
         ESP_LOGW(TAG, "WiFi not available, continuing in offline mode");
+        wifi_stop_reconnect();
     }
 
     // Audio + buttons init runs regardless of WiFi status.
