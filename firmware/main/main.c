@@ -672,23 +672,30 @@ void app_main(void)
     ESP_LOGI(TAG, "Stage 6 OK: boot screen shown");
 
     char ssid[64], password[64];
-    wifi_load_creds(ssid, sizeof(ssid), password, sizeof(password));
+    bool has_creds = (wifi_load_creds(ssid, sizeof(ssid), password, sizeof(password)) == ESP_OK);
+
+    if (!has_creds) {
+        ESP_LOGW(TAG, "No WiFi creds saved, entering provisioning mode");
+        wifi_init();
+        provisioning_start_ap();
+        provisioning_start_server();
+        ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
+        ESP_LOGI(TAG, "PROVISIONING MODE — waiting for config via AP");
+        while (1) vTaskDelay(pdMS_TO_TICKS(60000));
+    }
+
     ESP_LOGI(TAG, "Stage 7 OK: WiFi creds loaded");
     bod_save_stage("wifi_start");
+
+    // Pre-allocate I2S DMA channels before WiFi claims the DMA heap.
+    i2c_bus_init();
+    es8311_prealloc_i2s();
 
     wifi_init();
     esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_LOGI(TAG, "Stage 8 OK: WiFi init done");
 
-    // Pre-allocate I2S DMA channels before wifi_connect claims the
-    // DMA heap with ~17KB of static RX buffers. Only channel creation
-    // (no peripheral enable) — avoids MCLK noise during WiFi RF calibration.
-    i2c_bus_init();
-    es8311_prealloc_i2s();
-
-    // On battery: cap WiFi TX power to reduce peak-current brownout risk.
-    // esp_wifi_set_max_tx_power value is in 0.25dBm units; default is ~78 (+19.5dBm).
-    // Setting to 8 caps at +2dBm — sufficient to connect, cuts peak current significantly.
+    // Cap TX power on battery to reduce brownout risk.
     int bat_mv = power_read_battery_mv();
     if (bat_mv < 3900) {
         ESP_LOGW(TAG, "Low battery (%dmV), capping WiFi TX power to +2dBm", bat_mv);
@@ -696,12 +703,12 @@ void app_main(void)
     }
 
     wifi_connect(ssid, password);
-    ESP_LOGI(TAG, "Stage 9: WiFi connecting (up to 30s)...");
+    ESP_LOGI(TAG, "Stage 9: WiFi connecting (10s timeout)...");
 
-    int retries = 0;
-    while (!wifi_is_connected() && retries < 30) {
+    int retries = 10;
+    while (!wifi_is_connected() && retries > 0) {
         vTaskDelay(pdMS_TO_TICKS(1000));
-        retries++;
+        retries--;
     }
 
     if (wifi_is_connected()) {
@@ -721,29 +728,23 @@ void app_main(void)
             ESP_LOGW(TAG, "Stage 11: Hermes auth failed: %s", esp_err_to_name(auth_ret));
         }
         bod_save_stage("hermes_auth");
-
-        ESP_LOGI(TAG, "Stage 12: Finalizing audio + buttons...");
-        recordings_init_audio();
-        audio_pipeline_init();
-        audio_pipeline_set_wake_failed_cb(on_wake_failed);
-        audio_pipeline_set_recording_ended_cb(on_recording_ended);
-        audio_pipeline_set_response_cb(on_response);
-        button_set_callback(handle_button);
-        button_set_longpress_callback(handle_longpress, 1500);
-        buttons_init();
-        ESP_LOGI(TAG, "Stage 13 OK: Audio, buttons ready");
-        bod_save_stage("ready_for_home");
     } else {
-        ESP_LOGW(TAG, "Stage 10: WiFi not connected, starting provisioning");
-        esp_wifi_stop();
-        provisioning_start_ap();
-        provisioning_start_server();
-        ui_show_provisioning_screen("EInk-Voice-Config", "192.168.4.1");
-        ESP_LOGI(TAG, "PROVISIONING MODE — waiting for WiFi");
-        while (1) {
-            vTaskDelay(pdMS_TO_TICKS(60000));
-        }
+        ESP_LOGW(TAG, "WiFi not available, continuing in offline mode");
     }
+
+    // Audio + buttons init runs regardless of WiFi status.
+    ESP_LOGI(TAG, "Stage 12: Finalizing audio + buttons...");
+    recordings_init_audio();
+    audio_pipeline_init();
+    audio_pipeline_set_wake_failed_cb(on_wake_failed);
+    audio_pipeline_set_recording_ended_cb(on_recording_ended);
+    audio_pipeline_set_response_cb(on_response);
+    button_set_callback(handle_button);
+    button_set_longpress_callback(handle_longpress, 1500);
+    buttons_init();
+    ESP_LOGI(TAG, "Stage 13 OK: Audio, buttons ready");
+    bod_save_stage("ready_for_home");
+
     if (get_charging_state()) {
         ESP_LOGI(TAG, "Already charging at boot, entering docked state");
         was_charging = true;
