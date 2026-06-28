@@ -8,8 +8,9 @@
 
 static const char *TAG = "SYSTEM";
 
-#define PCA9554A_ADDR       0x3F
-#define TCA9554_ADDR_FB     0x38
+#define PCA9555_ADDR        0x20    /* PCA9555 16-bit I/O expander on Waveshare board */
+#define PCA9554A_ADDR       0x3F    /* fallback: PCA9554A 8-bit variant */
+#define TCA9554_ADDR_FB     0x38    /* fallback: TCA9554 */
 #define TCA9554_INPUT        0x00
 #define TCA9554_OUTPUT       0x01
 #define TCA9554_CONFIG       0x03
@@ -183,27 +184,32 @@ void system_init(void)
     ESP_LOGI(TAG, "Initializing system...");
     i2c_bus_init();
 
-    ESP_LOGI(TAG, "Scanning I2C bus for PCA9554A/TCA9554...");
+    ESP_LOGI(TAG, "Scanning I2C bus for I/O expander...");
     // Scan entire bus and log all responding addresses for debug
     for (uint8_t addr = 1; addr < 127; addr++) {
         if (i2c_master_probe(i2c_bus, addr, 50) == ESP_OK) {
             ESP_LOGI(TAG, "  I2C device found at 0x%02X", addr);
         }
     }
-    if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
+    if (i2c_probe(i2c_bus, PCA9555_ADDR)) {
+        tca9554_present = true;
+        ESP_LOGI(TAG, "PCA9555 (I/O expander) found at 0x%02X", PCA9555_ADDR);
+    } else if (i2c_probe(i2c_bus, PCA9554A_ADDR)) {
         tca9554_present = true;
         ESP_LOGI(TAG, "PCA9554A (I/O expander) found at 0x%02X", PCA9554A_ADDR);
     } else if (i2c_probe(i2c_bus, TCA9554_ADDR_FB)) {
         tca9554_present = true;
         ESP_LOGI(TAG, "TCA9554 found at 0x%02X", TCA9554_ADDR_FB);
     } else {
-        ESP_LOGW(TAG, "I/O expander NOT FOUND at 0x%02X or 0x%02X — audio amp, e-paper power, charger detection disabled",
-                 PCA9554A_ADDR, TCA9554_ADDR_FB);
+        ESP_LOGW(TAG, "I/O expander NOT FOUND — audio amp, e-paper power, charger detection disabled");
     }
 
     if (tca9554_present) {
-        const uint8_t tca_addr = i2c_probe(i2c_bus, PCA9554A_ADDR)
-                                     ? PCA9554A_ADDR : TCA9554_ADDR_FB;
+        uint8_t tca_addr = 0;
+        if (i2c_probe(i2c_bus, PCA9555_ADDR))       tca_addr = PCA9555_ADDR;
+        else if (i2c_probe(i2c_bus, PCA9554A_ADDR)) tca_addr = PCA9554A_ADDR;
+        else if (i2c_probe(i2c_bus, TCA9554_ADDR_FB)) tca_addr = TCA9554_ADDR_FB;
+
         i2c_device_config_t tca_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = tca_addr,
@@ -211,8 +217,10 @@ void system_init(void)
         };
         esp_err_t add_ret = i2c_master_bus_add_device(i2c_bus, &tca_cfg, &tca9554_dev);
         if (add_ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to add TCA9554 device: %s", esp_err_to_name(add_ret));
+            ESP_LOGE(TAG, "Failed to add I/O expander device at 0x%02X: %s", tca_addr, esp_err_to_name(add_ret));
             tca9554_present = false;
+        } else {
+            ESP_LOGI(TAG, "I/O expander added at 0x%02X", tca_addr);
         }
     }
 
