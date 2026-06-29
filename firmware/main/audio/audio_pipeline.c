@@ -82,11 +82,12 @@ static void audio_capture_task(void *arg)
         int32_t delta_us = (int32_t)(now - last_iter_time);
         last_iter_time = now;
         iter++;
-        if (iter % 10 == 0) {
-            ESP_LOGI(TAG, "capture iter=%lu read=%u ret=%s delta_us=%ld heap=%u",
+        if (iter % 5 == 0) {
+            ESP_LOGI(TAG, "capture iter=%lu read=%u ret=%s delta_us=%ld heap=%u avail=%u",
                      (unsigned long)iter, (unsigned)read,
                      ret == ESP_OK ? "OK" : ret == ESP_ERR_TIMEOUT ? "TIMEOUT" : "OTHER",
-                     (long)delta_us, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                     (long)delta_us, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)ringbuffer_available(&audio_rb));
         }
 
         if (ret == ESP_OK && read > 0) {

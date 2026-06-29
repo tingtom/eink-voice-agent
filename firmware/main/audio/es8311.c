@@ -115,6 +115,7 @@ static void es8311_i2s_deinit(void)
         g_tx = NULL;
     }
     if (g_rx) {
+        i2s_channel_disable(g_rx);
         i2s_del_channel(g_rx);
         g_rx = NULL;
     }
@@ -140,8 +141,10 @@ esp_err_t es8311_prealloc_i2s(void)
 
     // Disable channels so clock outputs stay silent during WiFi init.
     // DMA descriptors persist — they are freed only in i2s_del_channel().
-    i2s_channel_disable(g_tx);
-    i2s_channel_disable(g_rx);
+    // Note: i2s_channel_init_std_mode does NOT enable channels, so this is safe.
+    // The channels will be enabled when esp_codec_dev_open is called.
+    // i2s_channel_disable(g_tx);  // Not needed - channels aren't enabled yet
+    // i2s_channel_disable(g_rx);
 
     return ESP_OK;
 }
