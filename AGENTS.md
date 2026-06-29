@@ -76,10 +76,8 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - File renamed `wake_word.c` → `wake_word.cpp` (needs C++ for TFLite Micro API)
 
 ## Next Steps
-1. **Flash and test**: Build is verified compiling — flash to hardware and test SD card mount, recordings read/write, and wake word detection
+1. **Testing in progress**: Device shows audio being captured and POSTed successfully. Need to verify SD card read/write and wake word detection.
 2. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
-2. **Test with real audio**: Flash to hardware and test wake word detection with actual microphone input
-3. **Optimize inference speed**: MFE + FFT runs on ESP32-C6 FPU; if too slow, consider reducing FFT frame count or optimizing FFT with precomputed twiddle factors
 
 ## Critical Context
 - Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
