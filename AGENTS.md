@@ -76,7 +76,7 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - File renamed `wake_word.c` → `wake_word.cpp` (needs C++ for TFLite Micro API)
 
 ## Next Steps
-1. **Testing in progress**: Device shows audio being captured and POSTed successfully. Need to verify SD card read/write and wake word detection.
+1. **Testing**: Audio capture working (14 packets sent), transcription returning short text ("You"). Wait for DMA buffer update to improve capture timing.
 2. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
 
 ## Critical Context
