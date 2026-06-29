@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <errno.h>
 #include "ff.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -64,16 +65,19 @@ bool sdcard_mount(void)
     slot_cfg.gpio_cs = PIN_CS;
     slot_cfg.host_id = SPI_HOST;
 
-    // Mount FAT filesystem
+    // Mount FAT filesystem — NEVER auto-format (destroys user recordings)
     esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
-        .format_if_mount_failed = true,
+        .format_if_mount_failed = false,
         .max_files = 8,
-        .allocation_unit_size = 4096,
+        .allocation_unit_size = 512,
     };
+
+    ESP_LOGI(TAG, "Mounting SD card at %s (SPI%d, CS=GPIO%d, freq=%dkHz)",
+             SD_MOUNT_POINT, SPI_HOST + 1, PIN_CS, host.max_freq_khz);
 
     ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &sdcard_card);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SD card mount failed: %s (retrying once with delay)", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "SD card mount failed: %s", esp_err_to_name(ret));
         vTaskDelay(pdMS_TO_TICKS(100));
         ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &sdcard_card);
         if (ret != ESP_OK) {
@@ -85,6 +89,7 @@ bool sdcard_mount(void)
     sdcard_mounted = true;
     sdmmc_card_print_info(stdout, sdcard_card);
     ESP_LOGI(TAG, "SD card mounted at %s", SD_MOUNT_POINT);
+
     return true;
 }
 

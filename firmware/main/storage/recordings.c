@@ -96,15 +96,35 @@ static void rebuild_index(void)
 {
     note_count = 0;
     DIR *dir = opendir(REC_DIR);
-    if (!dir) return;
+    if (!dir) {
+        ESP_LOGE(TAG, "Cannot open recordings directory %s (errno=%d: %s)", REC_DIR, errno, strerror(errno));
+        return;
+    }
+
+    int total_entries = 0;
+    int matching_files = 0;
 
     struct dirent *entry;
+    
+    ESP_LOGI(TAG, "Scanning directory %s for recordings", REC_DIR);
     while ((entry = readdir(dir)) != NULL && note_count < REC_MAX_NOTES) {
+        total_entries++;
         const char *d = entry->d_name;
-        if (strncmp(d, "rec_", 4) != 0) continue;
+        
+        // Debug: show all files found
+        ESP_LOGD(TAG, "  Found file: '%s'", d);
+        
+        if (strncmp(d, "rec_", 4) != 0) {
+            ESP_LOGD(TAG, "    Skipping - wrong prefix");
+            continue;
+        }
         char *dot = strrchr(d, '.');
-        if (!dot || strcmp(dot, ".pcm") != 0) continue;
-
+        if (!dot || strcmp(dot, ".pcm") != 0) {
+            ESP_LOGD(TAG, "    Skipping - wrong extension");
+            continue;
+        }
+        
+        matching_files++;
         // Extract name without .pcm
         size_t len = dot - d;
         if (len >= REC_NAME_LEN) len = REC_NAME_LEN - 1;
@@ -162,6 +182,15 @@ static void rebuild_index(void)
         note_count++;
     }
     closedir(dir);
+
+    ESP_LOGI(TAG, "Scan complete: %d total entries, %d matching .pcm files, %d loaded into index",
+             total_entries, matching_files, note_count);
+
+    if (note_count == 0 && matching_files > 0) {
+        ESP_LOGW(TAG, "Found matching files but failed to load any - check metadata");
+    } else if (note_count == 0) {
+        ESP_LOGW(TAG, "No recordings found in %s", REC_DIR);
+    }
 }
 
 // ── Write metadata to SD ───────────────────────────

@@ -646,12 +646,15 @@ void app_main(void)
         }
     }
 
+    // Initialize SD card before e-paper to avoid SPI bus contention
+    recordings_init();
+    ESP_LOGI(TAG, "Stage 4 OK: Storage initialized");
+
     epaper_init();
-    ESP_LOGI(TAG, "Stage 4 OK: E-paper display initialized");
+    ESP_LOGI(TAG, "Stage 5 OK: E-paper display initialized");
     bod_save_stage("epaper_init");
     ui_init();
-    recordings_init();
-    ESP_LOGI(TAG, "Stage 5 OK: UI + storage initialized");
+    ESP_LOGI(TAG, "Stage 6 OK: UI initialized");
 
     if (!wifi_has_saved_creds()) {
         ESP_LOGI(TAG, "No WiFi credentials found, starting provisioning");
