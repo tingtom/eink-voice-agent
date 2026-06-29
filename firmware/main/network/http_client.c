@@ -34,7 +34,7 @@ esp_err_t http_post_json(const char *url, const char *json, char *response, size
         .method = HTTP_METHOD_POST,
         .event_handler = http_event_handler,
         .user_data = &resp_ctx,
-        .timeout_ms = 7000,
+        .timeout_ms = 15000,  // Long timeout for transcription
         .skip_cert_common_name_check = true,
         .keep_alive_enable = false,
     };
