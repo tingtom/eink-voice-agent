@@ -63,6 +63,8 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - **ES8311 format fix**: `0x06`/`0x16` changed from `0x70` (left-justified) to `0x00` (Philips I2S) — now matches I2S master Philips format (`bit_shift=true`)
 - **Renamed device**: `Merlin` → `Jeff`, wake word `"hey merlin"` → `"hi jeff"`
 - Build verified: firmware compiles successfully
+- **SD card fixes**: `format_if_mount_failed=false`, `allocation_unit_size=512`, enhanced rebuild_index diagnostics
+- **Whisper transcription fix**: Removed unsupported `--no_timestamps` arg, added explicit `--output_format txt`
 
 ### Blocked
 - (none)
@@ -74,17 +76,19 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - File renamed `wake_word.c` → `wake_word.cpp` (needs C++ for TFLite Micro API)
 
 ## Next Steps
-1. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
+1. **Flash and test**: Build is verified compiling — flash to hardware and test SD card mount, recordings read/write, and wake word detection
+2. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
 2. **Test with real audio**: Flash to hardware and test wake word detection with actual microphone input
 3. **Optimize inference speed**: MFE + FFT runs on ESP32-C6 FPU; if too slow, consider reducing FFT frame count or optimizing FFT with precomputed twiddle factors
 
 ## Critical Context
 - Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
 - Model output tensor: `StatefulPartitionedCall:0` int8 [1, 3], scale=0.00390625, zp=-128
-- Arena size: 162284 bytes (from heap DRAM)
+- **Arena size**: 130284 bytes (static BSS) + audio_buf (32KB)
 - Audio pipeline feeds 800-sample chunks; wake_word.cpp buffers internally to 16000
 - MFE parameters: 20ms frame (320 samples), 10ms stride (160 samples), 40 mel filters, 256-pt FFT, noise floor -52 dB
 - Classes: "hi_jeff" (index 0), "noise" (1), "unknown" (2) — sensitivity threshold 0.7
+- SD card mount config: `allocation_unit_size=512`, `format_if_mount_failed=false`, `max_files=8`
 
 ## Relevant Files
 - `firmware/main/audio/wake_word.cpp` — MFE + TFLite Micro inference (16000-sample buffer)

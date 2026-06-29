@@ -117,7 +117,11 @@ static void audio_capture_task(void *arg)
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        if (ret != ESP_OK || read == 0) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
     }
 }
 
