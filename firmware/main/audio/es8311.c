@@ -65,13 +65,13 @@ static esp_err_t es8311_i2s_hw_init(void)
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
         },
-        .slot_cfg = {
-            .slot_mode = I2S_SLOT_MODE_STEREO,
-            .slot_mask = I2S_STD_SLOT_BOTH,
-            .ws_width = 32,
-            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
-            .bit_shift = true,
-        },
+.slot_cfg = {
+        .slot_mode = I2S_SLOT_MODE_MONO,
+        .slot_mask = I2S_STD_SLOT_LEFT,
+        .ws_width = 16,
+        .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
+        .bit_shift = false,
+    },
         .gpio_cfg = {
             .mclk = I2S_MCLK_GPIO,
             .bclk = I2S_BCLK_GPIO,
@@ -272,7 +272,7 @@ esp_err_t es8311_init(void)
 
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = AUDIO_SAMPLE_RATE,
-        .channel = 2,
+        .channel = 1,
         .bits_per_sample = 16,
         .channel_mask = 0,
         .mclk_multiple = 256,
