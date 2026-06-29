@@ -280,9 +280,9 @@ void ui_show_docked_screen(void)
 void ui_show_sleep_screen(void)
 {
     epaper_clear();
-    epaper_draw_text(115, 50, "z", 21);
-    epaper_draw_text(90, 80, "zz", 14);
-    epaper_draw_text(70, 110, "zzz", 8);
+    epaper_draw_text(70, 50, "z", 8);
+    epaper_draw_text(85, 80, "zz", 14);
+    epaper_draw_text(100, 110, "zzz", 21);
     ui_draw_button_help(NULL, "wake -");
     epaper_full_refresh();
 }
@@ -309,12 +309,20 @@ void ui_update_battery(uint8_t pct)
 
 void ui_update_wifi_status(bool connected)
 {
+    if (wifi_ok == connected) return;
     wifi_ok = connected;
+    epaper_clear_rect(2, 2, DISPLAY_WIDTH - 4, 9);
+    draw_status_bar();
+    epaper_partial_refresh();
 }
 
 void ui_update_hermes_status(bool connected)
 {
+    if (hermes_ok == connected) return;
     hermes_ok = connected;
+    epaper_clear_rect(2, 2, DISPLAY_WIDTH - 4, 9);
+    draw_status_bar();
+    epaper_partial_refresh();
 }
 
 bool ui_is_hermes_connected(void)
