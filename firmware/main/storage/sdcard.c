@@ -66,9 +66,9 @@ bool sdcard_mount(void)
 
     // Mount FAT filesystem
     esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
-        .format_if_mount_failed = false,
+        .format_if_mount_failed = true,
         .max_files = 8,
-        .allocation_unit_size = 512,
+        .allocation_unit_size = 4096,
     };
 
     ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &sdcard_card);

@@ -85,3 +85,7 @@ void recording_sync_handle_response(const char *session, const char *text);
 // ── Delete ──────────────────────────────────────────
 
 void recording_delete(int idx);
+
+// ── Test tone ───────────────────────────────────────
+
+void recording_generate_test_tone(void);

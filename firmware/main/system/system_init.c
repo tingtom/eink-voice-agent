@@ -111,83 +111,8 @@ static void tca9554_write_output(uint8_t val)
     tca9554_write_reg(get_output_reg(), val);
 }
 
-/* ------------------------------------------------------------------ */
-/* Optional: Configure ES8311 for microphone input                    */
-static void es8311_mic_init(void)
-{
-    /* Wait a bit for the codec to power up after enabling AUDIO_PWR */
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    const uint8_t ES8311_ADDR = 0x18;
-    i2c_master_dev_handle_t es8311_dev = NULL;
-    esp_err_t ret;
-
-    /* Add temporary device handle for ES8311 */
-    i2c_device_config_t es8311_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = ES8311_ADDR,
-        .scl_speed_hz = 400000,
-    };
-    ret = i2c_master_bus_add_device(i2c_bus, &es8311_cfg, &es8311_dev);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to add ES8311 I2C device: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    /* 1. Power Management: Enable MICBIAS and ADC */
-    /* Assuming register 0x02: bit0 MICBIAS, bit1 ADCREN */
-    uint8_t reg = 0x02;
-    uint8_t val = 0;
-    ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
-    if (ret == ESP_OK) {
-        val |= (1 << 0) | (1 << 1); /* MICBIAS + ADCREN */
-        uint8_t tx[2] = { reg, val };
-        ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
-        if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "ES8311: MICBIAS and ADC enabled");
-        } else {
-            ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
-        }
-    } else {
-        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
-    }
-
-    /* 2. Set ADC input to MIC1 (assuming register 0x04, bits 1:0 = 01 for MIC1) */
-    reg = 0x04;
-    ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
-    if (ret == ESP_OK) {
-        val &= ~(0x03); /* Clear input select bits */
-        val |= 0x01;    /* MIC1 selected */
-        uint8_t tx[2] = { reg, val };
-        ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
-        if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "ES8311: ADC input set to MIC1");
-        } else {
-            ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
-        }
-    } else {
-        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
-    }
-
-    /* 3. Set ADC volume to a reasonable level (e.g., 0x0F for mid gain) */
-    reg = 0x05; /* Assuming ADC volume register */
-    ret = i2c_master_transmit_receive(es8311_dev, &reg, 1, &val, 1, 100);
-    if (ret == ESP_OK) {
-        val = 0x0F; /* Example mid gain */
-        uint8_t tx[2] = { reg, val };
-        ret = i2c_master_transmit(es8311_dev, tx, 2, 100);
-        if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "ES8311: ADC volume set");
-        } else {
-            ESP_LOGE(TAG, "Failed to write ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
-        }
-    } else {
-        ESP_LOGW(TAG, "Failed to read ES8311 reg 0x%02X: %s", reg, esp_err_to_name(ret));
-    }
-
-    /* Remove temporary device handle */
-    i2c_master_bus_rm_device(es8311_dev);
-}
+/* ES8311 I2C address (same as in es8311.c driver) */
+#define ES8311_I2C_ADDR  0x18
 
 /* ------------------------------------------------------------------ */
 /* I2C bus initialisation                                             */
@@ -315,15 +240,10 @@ void system_init(void)
     tca9554_write_reg(get_output_reg(), 0);
     ESP_LOGI(TAG, "I/O expander outputs initialized to 0x00");
 
-    /* Power up essential peripherals (keep LED off initially to save power) */
-    ESP_LOGI(TAG, "Turning on EPD power");
-    gpio_set_level(EXIO_EPD_PWR, 1);
-    ESP_LOGI(TAG, "Turning on audio power");
-    gpio_set_level(EXIO_AUDIO_PWR, 1);
-    /* Configure ES8311 for microphone input */
-    es8311_mic_init();
-    ESP_LOGI(TAG, "Turning on VBAT power");
-    gpio_set_level(EXIO_VBAT_PWR, 1);
+    /* Power up essential peripherals via I2C expander (keep LED off initially) */
+    uint8_t power_on = (1 << EXIO_EPD_PWR) | (1 << EXIO_AUDIO_PWR) | (1 << EXIO_VBAT_PWR);
+    tca9554_write_output(power_on);
+    ESP_LOGI(TAG, "I/O expander outputs set to 0x%02X (EPD+Audio+VBAT ON)", power_on);
 }
 
 /* ------------------------------------------------------------------ */

@@ -22,6 +22,7 @@
 #include "esp_heap_caps.h"
 #include "system_init.h"
 #include "wifi_manager.h"
+#include "driver/i2s_std.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 

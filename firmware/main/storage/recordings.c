@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <inttypes.h>
+#include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include "esp_log.h"
@@ -49,7 +50,12 @@ static void ensure_dir(const char *path)
 {
     struct stat st;
     if (stat(path, &st) != 0) {
-        mkdir(path, 0777);
+        ESP_LOGI(TAG, "Creating directory: %s", path);
+        if (mkdir(path, 0777) != 0) {
+            ESP_LOGE(TAG, "mkdir failed: %s (errno=%d: %s)", path, errno, strerror(errno));
+        }
+    } else {
+        ESP_LOGI(TAG, "Directory exists: %s", path);
     }
 }
 
@@ -75,9 +81,13 @@ static void write_counter(uint32_t val)
     char path[64];
     snprintf(path, sizeof(path), REC_DIR "/counter");
     FILE *f = fopen(path, "wb");
-    if (!f) return;
+    if (!f) {
+        ESP_LOGE(TAG, "write_counter: fopen failed %s (errno=%d: %s)", path, errno, strerror(errno));
+        return;
+    }
     fwrite(&val, sizeof(val), 1, f);
     fclose(f);
+    ESP_LOGI(TAG, "write_counter: wrote %lu to %s", (unsigned long)val, path);
 }
 
 // ── Index rebuild ──────────────────────────────────
@@ -194,9 +204,27 @@ bool recordings_init(void)
         return false;
     }
 
+    // Direct write test
+    {
+        FILE *tf = fopen("/sdcard/test_write.tmp", "wb");
+        if (tf) {
+            const char *msg = "write test ok";
+            fwrite(msg, 1, strlen(msg), tf);
+            fclose(tf);
+            ESP_LOGI(TAG, "Direct write test PASSED");
+            remove("/sdcard/test_write.tmp");
+        } else {
+            ESP_LOGE(TAG, "Direct write test FAILED (errno=%d: %s)", errno, strerror(errno));
+        }
+    }
+
     ensure_dir(REC_DIR);
     rebuild_index();
     ESP_LOGI(TAG, "%d recordings found on SD card", note_count);
+
+    if (note_count == 0) {
+        recording_generate_test_tone();
+    }
 
     // Compute capacity estimate
     uint32_t cap = recording_capacity_seconds();
@@ -238,7 +266,7 @@ bool recording_start(rec_type_t type)
     make_rec_path(rec_name, ".pcm", path, sizeof(path));
     rec_file = fopen(path, "wb");
     if (!rec_file) {
-        ESP_LOGE(TAG, "Failed to open %s for writing", path);
+        ESP_LOGE(TAG, "Failed to open %s for writing (errno=%d: %s)", path, errno, strerror(errno));
         return false;
     }
 
@@ -370,8 +398,11 @@ void recording_play(int idx)
 {
     if (idx < 0 || idx >= note_count) return;
 
-    ESP_LOGI(TAG, "TONE TEST: playing 1000Hz/1s debug tone instead of recording");
-    speaker_play_tone(1000, 1000);
+    recording_info_t *n = &notes[idx];
+    char path[64];
+    make_rec_path(n->name, ".pcm", path, sizeof(path));
+    ESP_LOGI(TAG, "Playing recording: %s", path);
+    speaker_play_file(path);
 }
 
 // ── Sync ────────────────────────────────────────────
@@ -493,4 +524,79 @@ void recording_delete(int idx)
     for (int i = idx; i < note_count - 1; i++) notes[i] = notes[i + 1];
     note_count--;
     ESP_LOGI(TAG, "Deleted recording %d", idx);
+}
+
+// ── Test tone generator ─────────────────────────────
+
+#include <math.h>
+
+void recording_generate_test_tone(void)
+{
+    if (!sdcard_is_mounted()) {
+        ESP_LOGW(TAG, "SD not mounted, cannot generate test tone");
+        return;
+    }
+
+    // Small delay for SD card to be fully ready after mount
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    uint32_t id = read_counter() + 1;
+    write_counter(id);
+
+    char name[REC_NAME_LEN];
+    snprintf(name, sizeof(name), "rec_%05" PRIu32, id);
+
+    char pcm_path[64];
+    make_rec_path(name, ".pcm", pcm_path, sizeof(pcm_path));
+
+    int sample_rate = AUDIO_SAMPLE_RATE;
+    int duration_ms = 2000;
+    int total_samples = (sample_rate * duration_ms) / 1000;
+
+    FILE *f = NULL;
+    for (int retry = 0; retry < 3 && !f; retry++) {
+        f = fopen(pcm_path, "wb");
+        if (!f) {
+            ESP_LOGW(TAG, "Retry %d: cannot create %s (errno=%d: %s)", retry, pcm_path, errno, strerror(errno));
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+    }
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to create test tone %s after retries", pcm_path);
+        return;
+    }
+
+    int16_t *buf = malloc(256 * sizeof(int16_t));
+    if (!buf) {
+        fclose(f);
+        return;
+    }
+
+    int written = 0;
+    while (written < total_samples) {
+        int batch = total_samples - written;
+        if (batch > 256) batch = 256;
+        for (int i = 0; i < batch; i++) {
+            double t = (double)(written + i) / sample_rate;
+            buf[i] = (int16_t)(8000.0 * sin(2.0 * 3.14159265 * 1000.0 * t));
+        }
+        fwrite(buf, sizeof(int16_t), batch, f);
+        written += batch;
+    }
+
+    free(buf);
+    fclose(f);
+
+    // Write .meta
+    recording_info_t info = {0};
+    strncpy(info.name, name, REC_NAME_LEN - 1);
+    info.timestamp = (uint32_t)(esp_timer_get_time() / 1000000);
+    info.duration_ms = duration_ms;
+    info.type = REC_TYPE_NOTE;
+    info.status = REC_STATUS_RAW;
+    strncpy(info.text, "1kHz test tone (2s)", REC_TEXT_MAX - 1);
+    write_meta(&info);
+
+    rebuild_index();
+    ESP_LOGI(TAG, "Generated test tone: %s (%dms, %d samples)", pcm_path, duration_ms, total_samples);
 }

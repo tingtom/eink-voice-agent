@@ -269,7 +269,7 @@ esp_err_t es8311_init(void)
 
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = AUDIO_SAMPLE_RATE,
-        .channel = 1,
+        .channel = 2,
         .bits_per_sample = 16,
         .channel_mask = 0,
         .mclk_multiple = 256,
@@ -291,8 +291,30 @@ esp_err_t es8311_init(void)
     esp_codec_set_disable_when_closed(g_playback_handle, false);
     esp_codec_set_disable_when_closed(g_record_handle, false);
 
+    // Ensure ADC gain is set — Waveshare example uses 45 dB
+    esp_codec_dev_set_in_gain(g_record_handle, 45.0f);
+    esp_codec_dev_set_out_vol(g_playback_handle, 100);
+
+    // Re-enable I2S channels that es8311_prealloc_i2s() disabled to keep
+    // clocks silent during WiFi RF calibration.  esp_codec_dev_open() above
+    // may or may not call i2s_channel_enable() depending on the codec driver,
+    // so do it explicitly to guarantee the channels are live.
+    if (g_tx) {
+        esp_err_t en_ret = i2s_channel_enable(g_tx);
+        if (en_ret != ESP_OK && en_ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "i2s_channel_enable(tx) failed: %s", esp_err_to_name(en_ret));
+        }
+    }
+    if (g_rx) {
+        esp_err_t en_ret = i2s_channel_enable(g_rx);
+        if (en_ret != ESP_OK && en_ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "i2s_channel_enable(rx) failed: %s", esp_err_to_name(en_ret));
+        }
+    }
+
     g_es8311_inited = true;
-    ESP_LOGI(TAG, "ES8311 initialized (esp_codec_dev, %d Hz, mono 16-bit)", AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "ES8311 initialized (esp_codec_dev, %d Hz, stereo 16-bit)", AUDIO_SAMPLE_RATE);
+
     return ESP_OK;
 
 fail:
@@ -356,4 +378,9 @@ esp_codec_dev_handle_t es8311_get_playback_handle(void)
 esp_codec_dev_handle_t es8311_get_record_handle(void)
 {
     return g_record_handle;
+}
+
+i2s_chan_handle_t es8311_get_rx_handle(void)
+{
+    return g_rx;
 }

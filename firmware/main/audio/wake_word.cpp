@@ -9,7 +9,7 @@
 #include "wake_word.h"
 #include "tflite_learn_1037720_5.h"
 #undef TFLITE_MODEL_ARENA_SIZE
-#define TFLITE_MODEL_ARENA_SIZE 162284  // Full arena needed by model
+#define TFLITE_MODEL_ARENA_SIZE 130284  // Reduced by 32KB to make room for audio_buf in BSS
 #include "model_ops.h"
 #include "model_metadata.h"
 #include "model_mfe.h"
@@ -21,17 +21,21 @@ static const char *TAG = "WAKE_WORD";
 #define INPUT_QUANT_SCALE  0.00390625f
 #define INPUT_QUANT_ZP     (-128)
 
-static int16_t audio_buf_storage[MFE_INPUT_SAMPLES];
-static int16_t *audio_buf = audio_buf_storage;
+// audio_buf in static BSS to avoid heap fragmentation (32KB contiguous unavailable)
+static int16_t audio_buf[MFE_INPUT_SAMPLES];
 static size_t audio_count = 0;
 
-static uint8_t tflite_arena_storage[TFLITE_MODEL_ARENA_SIZE];
-static uint8_t *tflite_arena = tflite_arena_storage;
+// Arena + FFT buffers in static BSS.  Total ~134KB BSS, leaving ~78KB heap.
+static uint8_t tflite_arena[TFLITE_MODEL_ARENA_SIZE];
+
 static const tflite::Model *tflite_model = NULL;
 static tflite::MicroMutableOpResolver<7> resolver;
 static tflite::MicroInterpreter *interpreter = NULL;
 static TfLiteTensor *input_tensor = NULL;
 static TfLiteTensor *output_tensor = NULL;
+
+static float re_buf[MFE_FFT_SIZE];
+static float im_buf[MFE_FFT_SIZE];
 
 static float sensitivity = WAKE_WORD_SENSITIVITY;
 static bool initialized = false;
@@ -75,58 +79,45 @@ static void fft_256(float *re, float *im)
     }
 }
 
+// Stream MFE: compute preemphasis on-the-fly per frame, quantize directly
+// to int8 output.  Eliminates preemph_buf (64KB) and feat_buf (16KB).
 static int extract_mfe(const int16_t *samples, int8_t *features_out)
 {
-    static float preemph[MFE_INPUT_SAMPLES];
-    static float re[MFE_FFT_SIZE];
-    static float im[MFE_FFT_SIZE];
-    static float feat_buf[MFE_NUM_FRAMES * MFE_NUM_FILTERS];
-
-    // Step 1: Preemphasis: y[n] = x[n] - 0.98 * x[n-1], then rescale to [-1, 1]
-    for (int i = 0; i < MFE_INPUT_SAMPLES; i++) {
-        float cur = (float)samples[i] / 32768.0f;
-        float prev = (i > 0) ? 0.98f * (float)samples[i - 1] / 32768.0f : 0.0f;
-        preemph[i] = cur - prev;
-    }
-
-    const float noise_floor = MFE_NOISE_FLOOR * -1.0f;               // 52
-    const float noise_scale = 1.0f / (noise_floor + 12.0f);          // 1/64
+    const float noise_floor = MFE_NOISE_FLOOR * -1.0f;
+    const float noise_scale = 1.0f / (noise_floor + 12.0f);
     const float inv_scale = 1.0f / INPUT_QUANT_SCALE;
     const int zp = INPUT_QUANT_ZP;
 
     for (int f = 0; f < MFE_NUM_FRAMES; f++) {
         int start = f * MFE_FRAME_STRIDE;
         for (int i = 0; i < MFE_FFT_SIZE; i++) {
-            re[i] = preemph[start + i] * mfe_hann_window[i];
+            int idx = start + i;
+            float cur = (float)samples[idx] / 32768.0f;
+            float prev = (idx > 0) ? 0.98f * (float)samples[idx - 1] / 32768.0f : 0.0f;
+            re_buf[i] = (cur - prev) * mfe_hann_window[i];
         }
-        memset(im, 0, sizeof(im));
-        fft_256(re, im);
+        memset(im_buf, 0, MFE_FFT_SIZE * sizeof(float));
+        fft_256(re_buf, im_buf);
 
         for (int m = 0; m < MFE_NUM_FILTERS; m++) {
             float sum = 0.0f;
             for (int k = 0; k < 129; k++) {
-                float power = (1.0f / MFE_FFT_SIZE) * (re[k] * re[k] + im[k] * im[k]);
+                float power = (1.0f / MFE_FFT_SIZE) * (re_buf[k] * re_buf[k] + im_buf[k] * im_buf[k]);
                 sum += mfe_filterbank[m][k] * power;
             }
             if (sum < 1e-30f) sum = 1e-30f;
             float db_val = 10.0f * log10f(sum);
 
-            // Normalize: (db + 52) / 64 → maps [-52, 12] dB to [0, 1]
             float normalized = (db_val + noise_floor) * noise_scale;
             if (normalized < 0.0f) normalized = 0.0f;
             if (normalized > 1.0f) normalized = 1.0f;
-            // 8-bit requantization (simulate training-time quantization)
             normalized = roundf(normalized * 256.0f) / 256.0f;
-            feat_buf[f * MFE_NUM_FILTERS + m] = normalized;
-        }
-    }
 
-    for (int i = 0; i < MFE_NUM_FRAMES * MFE_NUM_FILTERS; i++) {
-        float val = feat_buf[i];
-        int q = (int)(roundf(val * inv_scale)) + zp;
-        if (q < -128) q = -128;
-        if (q > 127) q = 127;
-        features_out[i] = (int8_t)q;
+            int q = (int)(roundf(normalized * inv_scale)) + zp;
+            if (q < -128) q = -128;
+            if (q > 127) q = 127;
+            features_out[f * MFE_NUM_FILTERS + m] = (int8_t)q;
+        }
     }
     return MFE_NUM_FRAMES * MFE_NUM_FILTERS;
 }
@@ -186,6 +177,10 @@ extern "C" void wake_word_init(void)
     ESP_LOGI(TAG, "Initializing wake word model: '%s' (sensitivity=%.1f)",
              WAKE_WORD, sensitivity);
 
+    size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    ESP_LOGI(TAG, "Free heap: %zu bytes (audio_buf in BSS, arena=%d)",
+             free_heap, TFLITE_MODEL_ARENA_SIZE);
+
     if (!setup_tflite()) {
         ESP_LOGE(TAG, "TFLite setup failed");
         return;
@@ -195,13 +190,23 @@ extern "C" void wake_word_init(void)
     ESP_LOGI(TAG, "Wake word initialized");
 }
 
+extern "C" void wake_word_deinit(void)
+{
+    initialized = false;
+    interpreter = NULL;
+    input_tensor = NULL;
+    output_tensor = NULL;
+
+    audio_count = 0;
+    ESP_LOGI(TAG, "Wake word deinitialized");
+}
+
 extern "C" bool wake_word_detect(const int16_t *audio, size_t samples)
 {
     if (!initialized) {
         ESP_LOGE(TAG, "wake_word_detect called but not initialized");
         return false;
     }
-    if (!audio_buf) return false;
 
     size_t to_copy = samples;
     if (audio_count + to_copy > MFE_INPUT_SAMPLES) {
