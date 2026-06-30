@@ -14,22 +14,12 @@ Parametric 3D printable case for Waveshare ESP32-C6-ePaper-1.54.
 
 | File | Description |
 |------|-------------|
-| `case.scad` | Parametric OpenSCAD case design (body + lid) |
-| `dimensions.dxf` | Board outline DXF (for reference) |
+| `case.scad` | Parametric OpenSCAD source |
+| `case_body.stl` | Exported mesh (ready for Fusion 360) |
 
-## Exporting to STEP/Fusion 360
+## Using in Fusion 360
 
-OpenSCAD exports STL. Convert to STEP with:
-
-```bash
-# Export STL from OpenSCAD
-openscad -o case_body.stl case.scad
-
-# Convert to STEP (requires FreeCAD CLI)
-FreeCADCmd --console mm case_body.stl case_body.step
-```
-
-Or import the STL directly into Fusion 360 (File → Import → STL).
+File → Import → STL to open `case_body.stl` directly, or edit `case.scad` in OpenSCAD and re-export.
 
 ## Case Parameters
 

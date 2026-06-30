@@ -1,5 +1,7 @@
 #include <string.h>
 #include <stdbool.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "epaper.h"
 #include "epaper_config.h"
@@ -11,6 +13,7 @@ static const char *TAG = "EPAPER";
 static epd_handle_t epd_handle = NULL;
 static uint8_t *fb = NULL;
 static bool initialized = false;
+static SemaphoreHandle_t fb_mutex = NULL;
 
 static void set_pixel(int x, int y, int color)
 {
@@ -25,6 +28,11 @@ static void set_pixel(int x, int y, int color)
 
 void epaper_init(void)
 {
+    fb_mutex = xSemaphoreCreateMutex();
+    if (!fb_mutex) {
+        ESP_LOGE(TAG, "Failed to create display mutex");
+    }
+
     epd_config_t cfg = {
         .pins = {
             .busy = EPAPER_BUSY_GPIO,
@@ -60,12 +68,16 @@ void epaper_clear(void)
 
 void epaper_full_refresh(void)
 {
+    if (fb_mutex) xSemaphoreTake(fb_mutex, portMAX_DELAY);
     epd_update(epd_handle, fb, EPD_UPDATE_FULL);
+    if (fb_mutex) xSemaphoreGive(fb_mutex);
 }
 
 void epaper_partial_refresh(void)
 {
+    if (fb_mutex) xSemaphoreTake(fb_mutex, portMAX_DELAY);
     epd_update(epd_handle, fb, EPD_UPDATE_PARTIAL);
+    if (fb_mutex) xSemaphoreGive(fb_mutex);
 }
 
 void epaper_draw_pixel(int x, int y, int color)
