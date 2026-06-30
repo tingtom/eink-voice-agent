@@ -99,8 +99,7 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Added chip ID diagnostic logging (registers 0xFD/0xFE/0xFF)
 
 ### In Progress
-- Flash updated firmware to test I2C address fix (current log shows "dev 18" indicating old code still running)
-- Verify chip ID read works to confirm ES8311 communication after flash
+- Flash updated firmware to test I2C address fix
 
 ## Critical Context
 - Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
