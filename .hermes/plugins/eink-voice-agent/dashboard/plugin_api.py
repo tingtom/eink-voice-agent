@@ -145,6 +145,9 @@ class TranscriptEntry(BaseModel):
     direction: str
     content: str
     session_id: str | None = None
+    battery: int | None = None
+    charging: bool | None = None
+    wifi_rssi: int | None = None
 
 
 # ── Routes ──────────────────────────────────────────────────────────
@@ -258,8 +261,11 @@ async def get_transcript(limit: int = 30):
             direction=e["direction"],
             content=e.get("content", ""),
             session_id=e.get("session_id"),
+            battery=e.get("battery"),
+            charging=e.get("charging"),
+            wifi_rssi=e.get("wifi_rssi"),
         )
         for e in entries
         if e.get("type") == "message" and e.get("direction")
     ]
-    return messages[-limit:]
+    return messages[-limit:][::-1]
