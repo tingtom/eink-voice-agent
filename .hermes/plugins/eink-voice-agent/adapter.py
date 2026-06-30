@@ -67,6 +67,12 @@ def _count_todos(todos):
     return total, done, total - done
 
 
+def _load_telemetry():
+    if TELEMETRY_FILE.exists():
+        return json.loads(TELEMETRY_FILE.read_text())
+    return {}
+
+
 def _recent_notes(limit=10):
     if not NOTES_DIR.exists():
         return []
@@ -340,10 +346,18 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             )
             note_file = NOTES_DIR / f"note_{timestamp}.txt"
             note_file.write_text(text)
-            _log_activity({"type": "message", "direction": "in",
-                           "content": f"[voice note] {text[:500]}".strip(),
-                           "session_id": session})
-            return f"Transcribed note saved:\n\n{text[:180]}"
+            telemetry = _load_telemetry()
+            _log_activity({
+                "type": "message", "direction": "in",
+                "content": f"[voice note] {text[:500]}".strip(),
+                "session_id": session,
+                "battery": telemetry.get("battery"),
+                "charging": telemetry.get("charging"),
+                "wifi_rssi": telemetry.get("wifi_rssi"),
+            })
+            reply = f"Transcribed note saved:\n\n{text[:180]}"
+            self._pending_responses[chat_id] = reply
+            return reply
 
         elif mode == "todo":
             if full_audio:
@@ -362,6 +376,15 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                 message_id=session,
             )
             await self.handle_message(event)
+            telemetry = _load_telemetry()
+            _log_activity({
+                "type": "message", "direction": "in",
+                "content": text,
+                "session_id": session,
+                "battery": telemetry.get("battery"),
+                "charging": telemetry.get("charging"),
+                "wifi_rssi": telemetry.get("wifi_rssi"),
+            })
             # Return a simple acknowledgment
             return "Todo command processed"
 
@@ -394,14 +417,27 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                 media_types=["audio/wav"],
             )
             await self.handle_message(event)
+            telemetry = _load_telemetry()
+            _log_activity({
+                "type": "message", "direction": "in",
+                "content": "[agent audio input]",
+                "session_id": session,
+                "battery": telemetry.get("battery"),
+                "charging": telemetry.get("charging"),
+                "wifi_rssi": telemetry.get("wifi_rssi"),
+            })
             return "Audio received"
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
         self._pending_responses[chat_id] = content
+        telemetry = _load_telemetry()
         _log_activity({
             "type": "message", "direction": "out",
             "content": content[:500],
             "session_id": chat_id,
+            "battery": telemetry.get("battery"),
+            "charging": telemetry.get("charging"),
+            "wifi_rssi": telemetry.get("wifi_rssi"),
         })
         return SendResult(success=True, message_id="")
 
@@ -506,11 +542,14 @@ class EInkDeviceAdapter(BasePlatformAdapter):
                 "direction": e["direction"],
                 "content": e.get("content", ""),
                 "session_id": e.get("session_id"),
+                "battery": e.get("battery"),
+                "charging": e.get("charging"),
+                "wifi_rssi": e.get("wifi_rssi"),
             }
             for e in entries
             if e.get("type") == "message" and e.get("direction")
         ]
-        return web.json_response(messages[-limit:])
+        return web.json_response(messages[-limit:][::-1])
 
 
 # ── Todo tools ─────────────────────────────────────────────────
