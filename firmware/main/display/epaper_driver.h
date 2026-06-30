@@ -13,5 +13,3 @@ void epaper_draw_rect(int x, int y, int w, int h, int fill);
 void epaper_clear_rect(int x, int y, int w, int h);
 void epaper_sleep(void);
 void epaper_wakeup(void);
-void epaper_acquire(void);
-void epaper_release(void);
