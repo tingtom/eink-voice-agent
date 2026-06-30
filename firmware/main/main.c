@@ -32,6 +32,7 @@
 #include "mode_todo.h"
 #include "mode_dashboard.h"
 #include "mode_games.h"
+#include "mode_settings.h"
 #include "recordings.h"
 #include "http_client.h"
 #include "sdcard.h"
@@ -88,7 +89,7 @@ typedef enum {
     APP_MODE_DASHBOARD,
     APP_MODE_GAMES,
     APP_MODE_VIEW_NOTES,
-    APP_MODE_SYNC,
+    APP_MODE_SETTINGS,
 } app_mode_t;
 
 typedef enum {
@@ -98,6 +99,7 @@ typedef enum {
     SUB_RESPONSE,
     SUB_NOTE_LIST,
     SUB_NOTE_DETAIL,
+    SUB_SETTINGS,
 } sub_state_t;
 
 static app_mode_t current_app_mode = APP_MODE_HOME;
@@ -132,7 +134,7 @@ static const char *menu_items[] = {
     "Todo List",
     "Games",
     "View Notes",
-    "Sync",
+    "Settings",
 };
 static const int menu_count = sizeof(menu_items) / sizeof(menu_items[0]);
 
@@ -143,7 +145,7 @@ static app_mode_t menu_mode_map[] = {
     APP_MODE_TODO,
     APP_MODE_GAMES,
     APP_MODE_VIEW_NOTES,
-    APP_MODE_SYNC,
+    APP_MODE_SETTINGS,
 };
 
 #define MAX_VISIBLE_MENU 7
@@ -156,8 +158,6 @@ static void rebuild_visible_menu(void)
     visible_menu_count = 0;
     for (int i = 0; i < menu_count; i++) {
         if (strcmp(menu_items[i], "Voice Agent") == 0) {
-            if (!wifi_is_connected() || !ui_is_hermes_connected()) continue;
-        } else if (strcmp(menu_items[i], "Sync") == 0) {
             if (!wifi_is_connected() || !ui_is_hermes_connected()) continue;
         }
         visible_menu_items[visible_menu_count] = menu_items[i];
@@ -232,20 +232,9 @@ static void enter_mode(app_mode_t mode)
             current_sub = SUB_NOTE_LIST;
             draw_note_list();
             break;
-        case APP_MODE_SYNC:
-            if (!wifi_is_connected()) {
-                ui_show_error("No WiFi\nCan't sync");
-                current_app_mode = APP_MODE_HOME;
-                current_sub = SUB_MENU;
-                return;
-            }
-            if (recording_pending_sync_count() == 0) {
-                ui_show_response("Nothing to sync!");
-                current_sub = SUB_RESPONSE;
-                return;
-            }
-            ui_show_processing_screen();
-            recording_sync_start();
+        case APP_MODE_SETTINGS:
+            mode_settings_start();
+            current_sub = SUB_SETTINGS;
             break;
         default:
             break;
@@ -409,8 +398,8 @@ static void handle_longpress(button_id_t btn)
                 draw_note_detail(notes_sel);
             }
             return;
-        case APP_MODE_SYNC:
-            return_home(false);
+        case APP_MODE_SETTINGS:
+            mode_settings_select();
             return;
         default:
             break;
@@ -444,7 +433,7 @@ static void handle_longpress(button_id_t btn)
             return_home(false);
             return;
         case APP_MODE_VIEW_NOTES:
-        case APP_MODE_SYNC:
+        case APP_MODE_SETTINGS:
             return_home(false);
             return;
         default:
@@ -515,8 +504,12 @@ static void handle_button(button_id_t btn)
         break;
     }
 
-    case APP_MODE_SYNC:
-        return_home(false);
+    case APP_MODE_SETTINGS:
+        if (btn == BUTTON_SELECT) {
+            mode_settings_prev();
+        } else if (btn == BUTTON_BACK) {
+            mode_settings_next();
+        }
         break;
 
     default:

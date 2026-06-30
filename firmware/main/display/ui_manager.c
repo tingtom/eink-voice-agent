@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <math.h>
 #include "esp_log.h"
 #include "app_config.h"
 #include "epaper_driver.h"
+#include "power_mgmt.h"
 
 static const char *TAG = "UI";
 static char status_text[32] = {0};
@@ -81,9 +83,10 @@ static void draw_status_bar(void)
         int tw = epaper_text_width("offline", 8);
         draw_offline_text((DISPLAY_WIDTH - tw) / 2, 3);
     }
-    draw_battery_icon(DISPLAY_WIDTH - 45, 3, battery);
+    uint8_t bat_pct = power_get_battery_pct();
+    draw_battery_icon(DISPLAY_WIDTH - 45, 3, bat_pct);
     char pct[8];
-    snprintf(pct, sizeof(pct), "%d%%", battery);
+    snprintf(pct, sizeof(pct), "%d%%", bat_pct);
     epaper_draw_text(DISPLAY_WIDTH - 22, 4, pct, 8);
 }
 
@@ -112,6 +115,7 @@ void ui_show_home_screen(void)
     epaper_draw_text((DISPLAY_WIDTH - tw1) / 2, 60, "Say 'Hi Jeff'", 12);
     draw_status_bar();
     ui_draw_button_help("hold to listen", NULL);
+    epaper_draw_text(2, DISPLAY_HEIGHT - 8, "Select mode via buttons", 6);
     epaper_partial_refresh();
 }
 
@@ -137,6 +141,23 @@ void ui_show_menu(const char **items, int count, int selected)
     epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 32, "sel -", 8);
     tw = epaper_text_width("down -", 8);
     epaper_draw_text(DISPLAY_WIDTH - tw - 4, DISPLAY_HEIGHT - 16, "down -", 8);
+    
+    // Draw description of selected item at bottom
+    const char *desc = "";
+    if (selected < count) {
+        if (strcmp(items[selected], "WiFi IP") == 0) desc = "Shows WiFi IP address";
+        else if (strcmp(items[selected], "Battery") == 0) desc = "Battery level and voltage";
+        else if (strcmp(items[selected], "Storage") == 0) desc = "SD card free/total space";
+        else if (strcmp(items[selected], "Manual Sync") == 0) desc = "Upload recordings";
+        else if (strcmp(items[selected], "Voice Agent") == 0) desc = "Chat with Jeff";
+        else if (strcmp(items[selected], "Transcribe") == 0) desc = "Speech to text";
+        else if (strcmp(items[selected], "Voice Note") == 0) desc = "Record voice notes";
+        else if (strcmp(items[selected], "Todo List") == 0) desc = "Voice todo items";
+        else if (strcmp(items[selected], "Games") == 0) desc = "Mini games";
+        else if (strcmp(items[selected], "View Notes") == 0) desc = "Listen to recordings";
+        else if (strcmp(items[selected], "Settings") == 0) desc = "Device info & sync";
+    }
+    epaper_draw_text(2, DISPLAY_HEIGHT - 8, desc, 6);
     epaper_partial_refresh();
 }
 
@@ -207,15 +228,27 @@ void ui_show_processing_screen(void)
 void ui_update_processing_anim(int frame)
 {
     int cx = DISPLAY_WIDTH / 2;
-    int cy = 85;
-    int sizes[] = {8, 12, 16, 20, 24, 20, 16, 12};
-    int s = sizes[frame % 8];
-
-    epaper_clear_rect(cx - 24, cy - 24, 48, 48);
-    epaper_draw_rect(cx - s, cy - s, s * 2, s * 2, 1);
-    if (s > 8) {
-        epaper_clear_rect(cx - s + 4, cy - s + 4, (s - 4) * 2, (s - 4) * 2);
+    int cy = VIZ_Y + VIZ_MAX_H / 2;  // Center vertically with recording viz
+    
+    // Rotating dot animation - 8 frames around circular path
+    static int prev_px = -100, prev_py = -100;
+    int phase = frame % 8;
+    
+    // Clear previous dot position
+    if (prev_px >= 0 && prev_py >= 0) {
+        epaper_clear_rect(prev_px - 3, prev_py - 3, 6, 6);
     }
+    
+    // Draw single rotating dot at 45-degree positions
+    float angle = (phase * 45.0f) * 3.14159f / 180.0f;
+    int r = 14;
+    int px = cx + (int)(r * cosf(angle));
+    int py = cy + (int)(r * sinf(angle));
+    
+    epaper_draw_rect(px - 2, py - 2, 4, 4, 1);
+    prev_px = px;
+    prev_py = py;
+    
     epaper_partial_refresh();
 }
 
@@ -266,11 +299,12 @@ static void draw_battery_icon_charging(int x, int y, int pct)
 void ui_show_docked_screen(void)
 {
     epaper_clear();
-    draw_battery_icon_charging(DISPLAY_WIDTH / 2 - 9, 40, battery);
+    uint8_t bat_pct = power_get_battery_pct();
+    draw_battery_icon_charging(DISPLAY_WIDTH / 2 - 9, 40, bat_pct);
     int tw = epaper_text_width("Sleep & Charge", 12);
     epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 70, "Sleep & Charge", 12);
     char pct[8];
-    snprintf(pct, sizeof(pct), "%d%%", battery);
+    snprintf(pct, sizeof(pct), "%d%%", bat_pct);
     int tw2 = epaper_text_width(pct, 16);
     epaper_draw_text((DISPLAY_WIDTH - tw2) / 2, 88, pct, 16);
     ui_draw_button_help("hold to exit", NULL);
@@ -300,7 +334,8 @@ void ui_update_battery(uint8_t pct)
     if (pct == battery) return;
     battery = pct;
     epaper_clear_rect(DISPLAY_WIDTH - 45, 2, 44, 11);
-    draw_battery_icon(DISPLAY_WIDTH - 45, 3, battery);
+    uint8_t bat_pct = power_get_battery_pct();
+    draw_battery_icon(DISPLAY_WIDTH - 45, 3, bat_pct);
     char pct_str[8];
     snprintf(pct_str, sizeof(pct_str), "%d%%", battery);
     epaper_draw_text(DISPLAY_WIDTH - 22, 4, pct_str, 8);

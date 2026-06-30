@@ -65,6 +65,8 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Build verified: firmware compiles successfully
 - **SD card fixes**: `format_if_mount_failed=false`, `allocation_unit_size=512`, enhanced rebuild_index diagnostics
 - **Whisper transcription fix**: Removed unsupported `--no_timestamps` arg, added explicit `--output_format txt`
+- **LED control**: Added `board_power_led_on/off()` in `system_init.h/c`, LED turns on during recording modes, off during sleep and when returning home
+- **Settings menu**: Added dedicated settings screen with WiFi IP, Battery, Storage, and Manual Sync options (moved from main menu Sync item)
 
 ### Blocked
 - (none)
@@ -74,8 +76,19 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Model stored as C array (xxd-style) — no INCBIN dependency
 - 7 TFLite ops registered: Reshape, Conv2D, DepthwiseConv2D, Add, FullyConnected, Softmax, Mean
 - File renamed `wake_word.c` → `wake_word.cpp` (needs C++ for TFLite Micro API)
+- **Processing flag timing fix**: Set `processing=true` BEFORE stopping recording to prevent wake word task from interrupting
+- **Wake word loop fix**: Added `processing` check to wake word inner loop to break early if transitioning
+- **Battery display fix**: `draw_status_bar()` and `ui_show_docked_screen()` now read live battery percentage instead of stale static value
+- **LED control**: Single pin (EXIO_LED on TCA9554 bit 4) turns on during recording, off during sleep/home
+- **Settings menu**: Replaced "Sync" menu item with "Settings" submenu containing WiFi IP, Battery, Storage, and Manual Sync
+- **Thinking animation**: Replaced pulsing square with rotating dot animation (circular pattern)
 
 ## Next Steps
+1. Flash updated firmware and test full transcription flow
+2. Verify wake word detection with "hi jeff"
+3. Test docked state shows correctly when plugged in
+4. Verify LED behavior during recording/sleep/home transitions
+
 1. **Testing**: Audio capture working (14 packets sent), transcription returning short text ("You"). Wait for DMA buffer update to improve capture timing.
 2. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
 

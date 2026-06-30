@@ -70,7 +70,7 @@ static esp_err_t es8311_i2s_hw_init(void)
         .slot_mask = I2S_STD_SLOT_LEFT,
         .ws_width = 16,
         .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
-        .bit_shift = false,
+        .bit_shift = true,
     },
         .gpio_cfg = {
             .mclk = I2S_MCLK_GPIO,

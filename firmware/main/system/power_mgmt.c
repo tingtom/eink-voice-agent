@@ -138,6 +138,7 @@ static void power_before_sleep(void)
 {
     epaper_sleep();
     board_power_audio_off();
+    board_power_led_off();
 }
 
 void power_enter_deep_sleep(uint64_t wake_time_us)

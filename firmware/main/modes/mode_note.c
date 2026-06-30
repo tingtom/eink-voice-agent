@@ -6,6 +6,7 @@
 #include "recordings.h"
 #include "wifi_manager.h"
 #include "ui_manager.h"
+#include "system_init.h"
 
 static const char *TAG = "MODE_NOTE";
 static bool active = false;
@@ -16,6 +17,7 @@ void mode_note_start(void)
     ESP_LOGI(TAG, "Note mode started");
     active = true;
     ui_show_recording_screen();
+    board_power_led_on();
 
     if (wifi_is_connected()) {
         is_offline = false;
@@ -34,10 +36,10 @@ void mode_note_stop(void)
         audio_pipeline_stop_offline_recording();
         ui_show_response("Offline note saved!");
     } else {
+        audio_pipeline_start_processing();  // Set BEFORE stopping to prevent spurious wake word checks
+        ui_show_processing_screen();
         audio_pipeline_stop_recording();
         audio_pipeline_send_end_recording();
-        ui_show_processing_screen();
-        audio_pipeline_start_processing();
     }
 }
 
@@ -46,6 +48,7 @@ void mode_note_finish(void)
     if (!active) return;
     audio_pipeline_stop_processing();
     active = false;
+    board_power_led_off();
     ui_show_home_screen();
 }
 

@@ -23,6 +23,7 @@ idf_component_register(
         "modes/mode_transcribe.c"
         "modes/mode_games.c"
         "modes/mode_dashboard.c"
+        "modes/mode_settings.c"
         "storage/sdcard.c"
         "storage/recordings.c"
         "utils/ringbuffer.c"

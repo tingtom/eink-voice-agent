@@ -80,7 +80,7 @@ static void fft_256(float *re, float *im)
 }
 
 // Stream MFE: compute preemphasis on-the-fly per frame, quantize directly
-// to int8 output.  Eliminates preemph_buf (64KB) and feat_buf (16KB).
+// to int8 output.
 static int extract_mfe(const int16_t *samples, int8_t *features_out)
 {
     const float noise_floor = MFE_NOISE_FLOOR * -1.0f;
@@ -93,6 +93,7 @@ static int extract_mfe(const int16_t *samples, int8_t *features_out)
         for (int i = 0; i < MFE_FFT_SIZE; i++) {
             int idx = start + i;
             float cur = (float)samples[idx] / 32768.0f;
+            // Preemphasis: y[n] = x[n] - 0.98 * x[n-1], continuous across all samples
             float prev = (idx > 0) ? 0.98f * (float)samples[idx - 1] / 32768.0f : 0.0f;
             re_buf[i] = (cur - prev) * mfe_hann_window[i];
         }
@@ -102,7 +103,10 @@ static int extract_mfe(const int16_t *samples, int8_t *features_out)
         for (int m = 0; m < MFE_NUM_FILTERS; m++) {
             float sum = 0.0f;
             for (int k = 0; k < 129; k++) {
-                float power = (1.0f / MFE_FFT_SIZE) * (re_buf[k] * re_buf[k] + im_buf[k] * im_buf[k]);
+                // Power spectrum for real FFT: 2x factor for non-DC/Nyquist bins
+                float power = (k == 0 || k == 128) 
+                    ? (re_buf[k] * re_buf[k] + im_buf[k] * im_buf[k]) / MFE_FFT_SIZE
+                    : 2.0f * (re_buf[k] * re_buf[k] + im_buf[k] * im_buf[k]) / MFE_FFT_SIZE;
                 sum += mfe_filterbank[m][k] * power;
             }
             if (sum < 1e-30f) sum = 1e-30f;
