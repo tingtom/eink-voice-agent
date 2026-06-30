@@ -377,9 +377,9 @@ static void response_poll_task(void *arg)
 
     char resp[1024];
     int retries = 0;
-    const int max_retries = 13;
+    const int max_retries = 20;  // ~30s timeout
 
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     if (cached_response[0] != '\0') {
         ESP_LOGI(TAG, "Response from cache: %.100s", cached_response);

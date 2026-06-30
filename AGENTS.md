@@ -99,8 +99,8 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Added chip ID diagnostic logging (registers 0xFD/0xFE/0xFF)
 
 ### In Progress
-- Lower wake word sensitivity threshold (was 0.7, now 0.5)
-- Fix response polling JSON parser to handle spaces after colon
+- Flash updated firmware to test I2C address fix
+- LLM response timeout: check gateway platform send() integration
 
 ## Critical Context
 - ES8311 I2C address: `.addr = 0x30` (ESP-IDF driver shifts >>1 to get 7-bit 0x18)
