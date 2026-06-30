@@ -161,6 +161,10 @@ esp_err_t es8311_init(void)
 
     board_power_audio_on();
 
+    // Give audio power time to stabilize before I2C communication
+    // (codec needs 10-50ms after power-on)
+    vTaskDelay(pdMS_TO_TICKS(50));
+
     esp_err_t ret = ESP_OK;
     if (!g_tx || !g_rx) {
         ret = es8311_i2s_alloc();
@@ -177,7 +181,7 @@ esp_err_t es8311_init(void)
 
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = I2C_PORT,
-        .addr = 0x18,  // Waveshare uses 0x18 (ESP-IDF default is 0x30)
+        .addr = 0x30,  // 8-bit address (driver uses >> 1 to convert to 7-bit 0x18)
         .bus_handle = bus,
     };
     g_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
@@ -298,9 +302,8 @@ esp_err_t es8311_init(void)
     esp_codec_dev_read_reg(g_record_handle, 0xFF, &version);
     ESP_LOGI(TAG, "ES8311 chip ID: 0x%02X%02X, version: 0x%02X", chip_id1, chip_id2, version);
 
-    // ES8311A has additional MIC control registers (0x29-0x2D) not in standard ES8311
-    // Try to enable MIC bias/LDO if chip supports it
-    esp_codec_dev_write_reg(g_record_handle, 0x2A, 0x7C);  // MIC_LDO_EN, MIC1L input, MICBIAS_EN
+    // Note: Register 0x14 controls analog PGA/DMIC select. For analog MIC,
+    // the gain is set via esp_codec_dev_set_in_gain() which writes to 0x16.
 
     esp_codec_set_disable_when_closed(g_playback_handle, false);
     esp_codec_set_disable_when_closed(g_record_handle, false);

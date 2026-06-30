@@ -59,7 +59,8 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Precomputed MFE tables: Hann window (256), Mel filterbank (40 × 129)
 - Model binary (615KB) converted to C array in `models/tflite_learn_1037720_5.c`
 - Dependencies added: `espressif/esp-tflite-micro` v1.3.7, `espressif/esp-nn` v1.2.3
-- **ES8311 audio fix (ADC)**: I2C address corrected to `0x18` (Waveshare), added MIC_LDO enable via register 0x2A, added chip ID diagnostic logging
+
+- **ES8311 audio fix**: Changed to `.addr = 0x30` (ESP-IDF 8-bit format → 7-bit 0x18), removed ES8311A-specific MIC_LDO register write, added chip ID diagnostics
 - **ES8311 format fix**: `0x06`/`0x16` changed from `0x70` (left-justified) to `0x00` (Philips I2S) — now matches I2S master Philips format (`bit_shift=true`)
 - **Renamed device**: `Merlin` → `Jeff`, wake word `"hey merlin"` → `"hi jeff"`
 - Build verified: firmware compiles successfully
@@ -92,12 +93,14 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 
 ## Progress
 ### Done
-- Fixed ES8311 I2C address: 0x18 (Waveshare) instead of 0x30 (ESP-IDF default)
-- Added MIC_LDO enable register write (0x2A = 0x7C) for analog MIC bias
-- Added chip ID diagnostic logging for debugging
+- Fixed I2C address in es8311.c: `.addr = 0x30` (ESP-IDF expects 8-bit format, shifts right by 1 to get 7-bit 0x18)
+- Removed ES8311A-specific MIC_LDO register 0x2A write (doesn't exist on standard ES8311)
+- Added 50ms power stabilization delay after `board_power_audio_on()`
+- Added chip ID diagnostic logging (registers 0xFD/0xFE/0xFF)
 
 ### In Progress
-- Audio capture timing issue: I2S read blocks for ~584ms suggesting no ADC data arrives. Testing MIC LDO fix.
+- Flash updated firmware to test I2C address fix (current log shows "dev 18" indicating old code still running)
+- Verify chip ID read works to confirm ES8311 communication after flash
 
 ## Critical Context
 - Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
