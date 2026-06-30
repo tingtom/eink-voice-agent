@@ -20,6 +20,7 @@ The device uses the [Waveshare ESP32-C6-ePaper-1.54](https://www.waveshare.com/w
 | `dimensions.dxf` | Board outline DXF |
 | `pinout.txt` | GPIO pin mapping reference |
 | `library.lib` | KiCad symbol library stubs |
+| `ESP32-C6-ePaper-1.54.sch` | KiCad schematic stubs |
 
 ## Modifications to Reference Board
 
