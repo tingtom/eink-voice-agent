@@ -1,0 +1,11 @@
+{
+  "file_version": 1,
+  "version": 1,
+  "board": {
+    "design_settings": {
+      "trace_clearance": 0.2,
+      "zone_clearance": 0.5,
+      "track_width": 0.25
+    }
+  }
+}

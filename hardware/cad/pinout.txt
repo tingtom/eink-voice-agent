@@ -1,0 +1,50 @@
+E-Ink Voice Agent - Connector Pinout Reference
+============================================
+
+ESP32-C6-ePaper-1.54 GPIO Mapping
+--------------------------------
+
+GPIO  Pin  Function              Connected To
+----  ---  --------              ------------
+18    37   I2C_SDA               TCA9554, PCF85063, SHTC3
+ 8    32   I2C_SCL               TCA9554, PCF85063, SHTC3
+ 5    39   EPAPER_MOSI           E-Paper (SPI)
+ 4    40   EPAPER_MISO           E-Paper (SPI)
+ 6    38   EPAPER_CLK            E-Paper (SPI)
+ 7    37   EPAPER_CS             E-Paper (SPI)
+15    35   EPAPER_DC             E-Paper control
+11    33   EPAPER_RST            E-Paper control
+10    31   EPAPER_BUSY           E-Paper status
+19    36   I2S_MCLK            INMP441, MAX98357A
+21    34   I2S_BCLK            INMP441, MAX98357A
+22    33   I2S_WS              INMP441, MAX98357A
+20    32   I2S_DIN             INMP441 (mic data in)
+23    31   I2S_DOUT            MAX98357A (speaker data out)
+ 3    30   SD_CS                 SD Card (shared SPI)
+ 9    28   BUTTON_BOOT           Tactile switch to GND
+ 2    25   BUTTON_PWR            Tactile switch to GND
+
+I2C Expander (TCA9554 on 0x3F) Output Pins:
+0: EPD_PWR      - e-Paper power enable
+1: AUDIO_PWR    - Audio power enable
+2: (NC)
+3: AMP_ENABLE   - MAX98357A shutdown control
+4: LED          - Status LED (EXIO_LED)
+5: VBAT_PWR     - Battery monitor power
+6: (NC)
+7: (NC)
+
+Audio Codec (ES8311 on I2C):
+- Controlled via I2C (GPIO18/8)
+- I2S signals from main ESP32
+- MIC1L input enabled to ADC (0x2A = 0x7C)
+
+Display (GDEY0154M09 - 1.54" e-Paper):
+- SPI interface
+- 200x200 pixel resolution
+- 24mm x 24mm active area
+
+External Components:
+- INMP441: I2S MEMS microphone (no I2C, uses I2S only)
+- MAX98357A: I2S Class-D amplifier (SD pin for shutdown)
+- LiPo: 3.7V battery, 1000mAh+ with TP4056 charging
