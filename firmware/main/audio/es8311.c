@@ -70,7 +70,7 @@ static esp_err_t es8311_i2s_hw_init(void)
         .slot_mask = I2S_STD_SLOT_LEFT,
         .ws_width = 16,
         .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
-        .bit_shift = true,
+        .bit_shift = true,  // Required: ESP-IDF quirk for proper ADC data alignment
     },
         .gpio_cfg = {
             .mclk = I2S_MCLK_GPIO,
@@ -177,7 +177,7 @@ esp_err_t es8311_init(void)
 
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = I2C_PORT,
-        .addr = ES8311_CODEC_DEFAULT_ADDR,
+        .addr = 0x18,  // Waveshare uses 0x18 (ESP-IDF default is 0x30)
         .bus_handle = bus,
     };
     g_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
@@ -291,6 +291,17 @@ esp_err_t es8311_init(void)
         goto fail;
     }
 
+    // Verify I2C communication by reading chip ID
+    int chip_id1 = 0, chip_id2 = 0, version = 0;
+    esp_codec_dev_read_reg(g_record_handle, 0xFD, &chip_id1);
+    esp_codec_dev_read_reg(g_record_handle, 0xFE, &chip_id2);
+    esp_codec_dev_read_reg(g_record_handle, 0xFF, &version);
+    ESP_LOGI(TAG, "ES8311 chip ID: 0x%02X%02X, version: 0x%02X", chip_id1, chip_id2, version);
+
+    // ES8311A has additional MIC control registers (0x29-0x2D) not in standard ES8311
+    // Try to enable MIC bias/LDO if chip supports it
+    esp_codec_dev_write_reg(g_record_handle, 0x2A, 0x7C);  // MIC_LDO_EN, MIC1L input, MICBIAS_EN
+
     esp_codec_set_disable_when_closed(g_playback_handle, false);
     esp_codec_set_disable_when_closed(g_record_handle, false);
 
@@ -316,7 +327,7 @@ esp_err_t es8311_init(void)
     }
 
     g_es8311_inited = true;
-    ESP_LOGI(TAG, "ES8311 initialized (esp_codec_dev, %d Hz, stereo 16-bit)", AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "ES8311 initialized (esp_codec_dev, %d Hz, mono 16-bit)", AUDIO_SAMPLE_RATE);
 
     return ESP_OK;
 
