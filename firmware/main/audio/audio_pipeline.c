@@ -348,14 +348,18 @@ void audio_pipeline_stop_processing(void)
     processing = false;
 }
 
-// Extract string value from JSON: search for "\"key\":\"" then read until next '"'
+// Extract string value from JSON: search for "\"key\":\" (with optional space after colon)
 // Returns pointer to value text (null-terminated in-place) or NULL if not found.
 static const char *json_extract_string(const char *json, const char *key)
 {
     char pattern[64];
     snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
     const char *start = strstr(json, pattern);
-    if (!start) return NULL;
+    if (!start) {
+        snprintf(pattern, sizeof(pattern), "\"%s\": \"", key);
+        start = strstr(json, pattern);
+        if (!start) return NULL;
+    }
     start += strlen(pattern);
     const char *end = strchr(start, '"');
     if (!end) return NULL;
