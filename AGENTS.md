@@ -59,7 +59,7 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Precomputed MFE tables: Hann window (256), Mel filterbank (40 × 129)
 - Model binary (615KB) converted to C array in `models/tflite_learn_1037720_5.c`
 - Dependencies added: `espressif/esp-tflite-micro` v1.3.7, `espressif/esp-nn` v1.2.3
-- **ES8311 audio fix (ADC)**: `0x2A` set to `0x7C` — enables MIC1L input to ADC (was disabled, bit 3 = 0 in old `0x74`)
+- **ES8311 audio fix (ADC)**: I2C address corrected to `0x18` (Waveshare), added MIC_LDO enable via register 0x2A, added chip ID diagnostic logging
 - **ES8311 format fix**: `0x06`/`0x16` changed from `0x70` (left-justified) to `0x00` (Philips I2S) — now matches I2S master Philips format (`bit_shift=true`)
 - **Renamed device**: `Merlin` → `Jeff`, wake word `"hey merlin"` → `"hi jeff"`
 - Build verified: firmware compiles successfully
@@ -90,8 +90,14 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 3. Test docked state shows correctly when plugged in
 4. Verify LED behavior during recording/sleep/home transitions
 
-1. **Testing**: Audio capture working (14 packets sent), transcription returning short text ("You"). Wait for DMA buffer update to improve capture timing.
-2. **Tune MFE normalization**: The current implementation normalizes per-frame: (db_val - noise_floor) / (max_db - noise_floor). Verify this matches Edge Impulse's expected input distribution. May need per-file min/max normalization instead.
+## Progress
+### Done
+- Fixed ES8311 I2C address: 0x18 (Waveshare) instead of 0x30 (ESP-IDF default)
+- Added MIC_LDO enable register write (0x2A = 0x7C) for analog MIC bias
+- Added chip ID diagnostic logging for debugging
+
+### In Progress
+- Audio capture timing issue: I2S read blocks for ~584ms suggesting no ADC data arrives. Testing MIC LDO fix.
 
 ## Critical Context
 - Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
