@@ -97,6 +97,8 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Removed ES8311A-specific MIC_LDO register 0x2A write (doesn't exist on standard ES8311)
 - Added 50ms power stabilization delay after `board_power_audio_on()`
 - Added chip ID diagnostic logging (registers 0xFD/0xFE/0xFF)
+- Lower wake word sensitivity threshold (was 0.7, now 0.5)
+- Wake word detection verified working on device
 
 ### In Progress
 - Flash updated firmware to test I2C address fix
