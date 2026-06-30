@@ -102,6 +102,7 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Flash updated firmware to test I2C address fix
 
 ## Critical Context
+- ES8311 I2C address: `.addr = 0x30` (ESP-IDF driver shifts >>1 to get 7-bit 0x18)
 - Model input tensor: `serving_default_x:0` int8 [1, 3960], scale=0.00390625, zp=-128
 - Model output tensor: `StatefulPartitionedCall:0` int8 [1, 3], scale=0.00390625, zp=-128
 - **Arena size**: 130284 bytes (static BSS) + audio_buf (32KB)
