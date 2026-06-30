@@ -76,7 +76,7 @@ Provides platform adapter `eink_voice_agent` (WebSocket server on `:8123` for de
 - Model stored as C array (xxd-style) — no INCBIN dependency
 - 7 TFLite ops registered: Reshape, Conv2D, DepthwiseConv2D, Add, FullyConnected, Softmax, Mean
 - File renamed `wake_word.c` → `wake_word.cpp` (needs C++ for TFLite Micro API)
-- **CAD Design**: Parametric OpenSCAD case in `hardware/cad/case.scad` for ESP32-C6-ePaper-1.54 (68x35mm board, 24x24mm display window, button cutouts, speaker/mic openings)
+- **CAD Design**: Parametric OpenSCAD case in `hardware/case/case.scad` for ESP32-C6-ePaper-1.54 (68x35mm board, 24x24mm display window, button cutouts, speaker/mic openings)
 - **Processing flag timing fix**: Set `processing=true` BEFORE stopping recording to prevent wake word task from interrupting
 - **Wake word loop fix**: Added `processing` check to wake word inner loop to break early if transitioning
 - **Battery display fix**: `draw_status_bar()` and `ui_show_docked_screen()` now read live battery percentage instead of stale static value
