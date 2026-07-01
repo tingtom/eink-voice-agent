@@ -307,10 +307,6 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             session = chat_id
         mode = body.get("mode", "agent")
 
-        # Wait briefly for in-flight audio chunks that left the firmware
-        # after recording stopped but before the ring buffer drain completed.
-        await asyncio.sleep(0.5)
-
         chunks = self._audio_buffers.pop(session, [])
         # Each chunk is independently base64-encoded; concatenate decoded bytes
         import base64
@@ -320,6 +316,9 @@ class EInkDeviceAdapter(BasePlatformAdapter):
 
         try:
             reply = await self._process_end(session, mode, full_audio, chat_id, device_id)
+            # If _process_end already returned a web.Response, use it directly
+            if isinstance(reply, web.Response):
+                return reply
             return web.json_response({"type": "response", "data": reply})
         except Exception as e:
             logger.error("Audio processing error: %s", e)
@@ -357,30 +356,36 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         start_time = self._audio_start_times.pop(session, None)
         elapsed = (_t.monotonic() - start_time) if start_time else 0
         actual_sr = int(total_samples / elapsed) if elapsed > 0 else 16000
-        # Clamp to reasonable range
-        actual_sr = max(8000, min(48000, actual_sr))
+        # Clamp to reasonable range (ES8311 can run as low as ~1kHz when misconfigured)
+        actual_sr = max(1000, min(48000, actual_sr))
         logger.info("Audio timing: %d samples, %.2fs elapsed, estimated %d Hz",
                      total_samples, elapsed, actual_sr)
 
         if mode == "transcribe":
-            text = _transcribe_audio(full_audio, sample_rate=actual_sr)
-            timestamp = __import__("datetime").datetime.now().strftime(
-                "%Y-%m-%d_%H-%M-%S"
-            )
-            note_file = NOTES_DIR / f"note_{timestamp}.txt"
-            note_file.write_text(text)
-            telemetry = _load_telemetry()
-            _log_activity({
-                "type": "message", "direction": "in",
-                "content": f"[voice note] {text[:500]}".strip(),
-                "session_id": session,
-                "battery": telemetry.get("battery"),
-                "charging": telemetry.get("charging"),
-                "wifi_rssi": telemetry.get("wifi_rssi"),
-            })
-            reply = f"Transcribed note saved:\n\n{text[:180]}"
-            self._pending_responses[chat_id] = reply
-            return reply
+            # Run transcription in background so /end returns quickly
+            async def _do_transcribe():
+                text = _transcribe_audio(full_audio, sample_rate=actual_sr)
+                timestamp = __import__("datetime").datetime.now().strftime(
+                    "%Y-%m-%d_%H-%M-%S"
+                )
+                note_file = NOTES_DIR / f"note_{timestamp}.txt"
+                note_file.write_text(text)
+                telemetry = _load_telemetry()
+                _log_activity({
+                    "type": "message", "direction": "in",
+                    "content": f"[voice note] {text[:500]}".strip(),
+                    "session_id": session,
+                    "battery": telemetry.get("battery"),
+                    "charging": telemetry.get("charging"),
+                    "wifi_rssi": telemetry.get("wifi_rssi"),
+                })
+                reply = f"Transcribed note saved:\n\n{text[:180]}"
+                self._pending_responses[chat_id] = reply
+                logger.info("Transcription complete: %s", text[:80])
+
+            asyncio.create_task(_do_transcribe())
+            # Return JSON so firmware can parse "Audio received"
+            return web.json_response({"type": "response", "data": "Audio received"})
 
         elif mode == "todo":
             if full_audio:
