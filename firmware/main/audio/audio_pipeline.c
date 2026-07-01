@@ -83,11 +83,18 @@ static void audio_capture_task(void *arg)
         last_iter_time = now;
         iter++;
         if (iter % 5 == 0) {
-            ESP_LOGI(TAG, "capture iter=%lu read=%u ret=%s delta_us=%ld heap=%u avail=%u",
+            // Calculate actual capture rate from delta_us
+            int capture_rate = (delta_us > 0) ? (int)((int64_t)read * 1000000 / delta_us) : 0;
+            ESP_LOGI(TAG, "capture iter=%lu read=%u ret=%s delta_us=%ld rate=%dHz heap=%u avail=%u",
                      (unsigned long)iter, (unsigned)read,
                      ret == ESP_OK ? "OK" : ret == ESP_ERR_TIMEOUT ? "TIMEOUT" : "OTHER",
-                     (long)delta_us, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (long)delta_us, capture_rate,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)ringbuffer_available(&audio_rb));
+            if (capture_rate > 0 && capture_rate < AUDIO_SAMPLE_RATE / 2) {
+                ESP_LOGW(TAG, "CAPTURE SLOW: %d Hz vs expected %d Hz (%dx slower)",
+                         capture_rate, AUDIO_SAMPLE_RATE, AUDIO_SAMPLE_RATE / capture_rate);
+            }
         }
 
         if (ret == ESP_OK && read > 0) {
@@ -321,6 +328,55 @@ void audio_pipeline_init(void)
     xTaskCreate(vad_task, "vad", 4096, NULL, 4, NULL);
     xTaskCreate(wake_word_task, "wake_word", 4096, NULL, 3, NULL);
     ESP_LOGI(TAG, "Audio pipeline initialized (two-stage VAD + wake word)");
+
+    // Measure actual I2S sample rate by timing a mic_read
+    {
+        int16_t probe_buf[800];
+        size_t probe_read = 0;
+        int64_t t0 = esp_timer_get_time();
+        esp_err_t ret = mic_read(probe_buf, 800, &probe_read);
+        int64_t t1 = esp_timer_get_time();
+        int32_t elapsed_us = (int32_t)(t1 - t0);
+        if (ret == ESP_OK && probe_read > 0 && elapsed_us > 0) {
+            int actual_rate = (int)((int64_t)probe_read * 1000000 / elapsed_us);
+            ESP_LOGI(TAG, "I2S PROBE (via esp_codec_dev): mic_read(%d samples) took %ld us, actual rate = %d Hz (expected %d Hz)",
+                     (int)probe_read, (long)elapsed_us, actual_rate, AUDIO_SAMPLE_RATE);
+            if (actual_rate < AUDIO_SAMPLE_RATE / 2) {
+                ESP_LOGW(TAG, "I2S PROBE: WARNING sample rate is %dx slower than expected!", AUDIO_SAMPLE_RATE / actual_rate);
+            }
+        } else {
+            ESP_LOGE(TAG, "I2S PROBE: mic_read failed ret=%s read=%d elapsed=%ld us",
+                     esp_err_to_name(ret), (int)probe_read, (long)elapsed_us);
+        }
+    }
+
+    // Raw I2S probe: bypass esp_codec_dev, read directly from I2S RX channel
+    {
+        i2s_chan_handle_t rx = es8311_get_rx_handle();
+        if (rx) {
+            int16_t raw_buf[800];
+            size_t br = 0;
+            int64_t t0 = esp_timer_get_time();
+            esp_err_t ret = i2s_channel_read(rx, raw_buf, sizeof(raw_buf), &br, pdMS_TO_TICKS(5000));
+            int64_t t1 = esp_timer_get_time();
+            int32_t elapsed_us = (int32_t)(t1 - t0);
+            int samples_read = br / sizeof(int16_t);
+            if (ret == ESP_OK && samples_read > 0 && elapsed_us > 0) {
+                int actual_rate = (int)((int64_t)samples_read * 1000000 / elapsed_us);
+                ESP_LOGI(TAG, "I2S PROBE (raw i2s_channel_read): got %d samples in %ld us, actual rate = %d Hz",
+                         samples_read, (long)elapsed_us, actual_rate);
+                // Show first few samples to verify data is changing
+                ESP_LOGI(TAG, "I2S PROBE raw[0..7]: %d %d %d %d %d %d %d %d",
+                         raw_buf[0], raw_buf[1], raw_buf[2], raw_buf[3],
+                         raw_buf[4], raw_buf[5], raw_buf[6], raw_buf[7]);
+            } else {
+                ESP_LOGE(TAG, "I2S PROBE raw: failed ret=%s got=%d bytes elapsed=%ld us",
+                         esp_err_to_name(ret), (int)br, (long)elapsed_us);
+            }
+        } else {
+            ESP_LOGE(TAG, "I2S PROBE raw: RX handle is NULL");
+        }
+    }
 }
 
 void audio_pipeline_start_recording(audio_mode_t mode)

@@ -302,8 +302,34 @@ esp_err_t es8311_init(void)
     esp_codec_dev_read_reg(g_record_handle, 0xFF, &version);
     ESP_LOGI(TAG, "ES8311 chip ID: 0x%02X%02X, version: 0x%02X", chip_id1, chip_id2, version);
 
-    // Note: Register 0x14 controls analog PGA/DMIC select. For analog MIC,
-    // the gain is set via esp_codec_dev_set_in_gain() which writes to 0x16.
+    // Dump key configuration registers for clock diagnostics
+    {
+        int r = 0;
+        esp_codec_dev_read_reg(g_record_handle, 0x02, &r); ESP_LOGI(TAG, "REG 0x02 (ADC Ctrl1):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x03, &r); ESP_LOGI(TAG, "REG 0x03 (ADC Ctrl2):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x04, &r); ESP_LOGI(TAG, "REG 0x04 (ADC Ctrl3):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x08, &r); ESP_LOGI(TAG, "REG 0x08 (DAC Ctrl1):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x09, &r); ESP_LOGI(TAG, "REG 0x09 (DAC Ctrl2):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x0A, &r); ESP_LOGI(TAG, "REG 0x0A (DAC Ctrl3):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x0B, &r); ESP_LOGI(TAG, "REG 0x0B (DAC Ctrl4):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x0D, &r); ESP_LOGI(TAG, "REG 0x0D (Codec Ctrl1):  0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x0E, &r); ESP_LOGI(TAG, "REG 0x0E (Codec Ctrl2):  0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x0F, &r); ESP_LOGI(TAG, "REG 0x0F (Clock2):       0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x10, &r); ESP_LOGI(TAG, "REG 0x10 (Clock3):       0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x11, &r); ESP_LOGI(TAG, "REG 0x11 (ADC/SLOT):     0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x12, &r); ESP_LOGI(TAG, "REG 0x12 (DAC/SLOT):     0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x14, &r); ESP_LOGI(TAG, "REG 0x14 (ADC PGA):      0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x17, &r); ESP_LOGI(TAG, "REG 0x17 (ADC Vol):      0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x1A, &r); ESP_LOGI(TAG, "REG 0x1A (DAC Vol):      0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x1D, &r); ESP_LOGI(TAG, "REG 0x1D (Master Mode):  0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x20, &r); ESP_LOGI(TAG, "REG 0x20 (Master/CLK):   0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x21, &r); ESP_LOGI(TAG, "REG 0x21 (ADC Power):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x22, &r); ESP_LOGI(TAG, "REG 0x22 (DAC Power):    0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x24, &r); ESP_LOGI(TAG, "REG 0x24 (ADC ESL):      0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x25, &r); ESP_LOGI(TAG, "REG 0x25 (DAC ESL):      0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x26, &r); ESP_LOGI(TAG, "REG 0x26 (ADC MCLK):     0x%02X", r);
+        esp_codec_dev_read_reg(g_record_handle, 0x27, &r); ESP_LOGI(TAG, "REG 0x27 (DAC MCLK):     0x%02X", r);
+    }
 
     esp_codec_set_disable_when_closed(g_playback_handle, false);
     esp_codec_set_disable_when_closed(g_record_handle, false);
