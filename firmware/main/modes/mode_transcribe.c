@@ -37,7 +37,7 @@ void mode_transcribe_stop(void)
         ui_show_home_screen();
     } else {
         audio_pipeline_start_processing();  // Set BEFORE stopping to prevent spurious wake word checks
-        ui_show_processing_screen();
+        ui_show_processing_screen("Transcribing...");
         audio_pipeline_stop_recording();
         audio_pipeline_send_end_recording();
     }

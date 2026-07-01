@@ -158,7 +158,7 @@ static void rebuild_visible_menu(void)
     visible_menu_count = 0;
     for (int i = 0; i < menu_count; i++) {
         if (strcmp(menu_items[i], "Voice Agent") == 0) {
-            if (!wifi_is_connected() || !ui_is_hermes_connected()) continue;
+            if (!wifi_is_connected()) continue;
         }
         visible_menu_items[visible_menu_count] = menu_items[i];
         visible_menu_modes[visible_menu_count] = menu_mode_map[i];

@@ -217,11 +217,11 @@ void ui_update_recording_viz(int32_t energy)
     // stops and a full/partial refresh is triggered elsewhere.
 }
 
-void ui_show_processing_screen(void)
+void ui_show_processing_screen(const char *text)
 {
     epaper_clear();
-    int tw = epaper_text_width("Thinking...", 16);
-    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 25, "Thinking...", 16);
+    int tw = epaper_text_width(text, 16);
+    epaper_draw_text((DISPLAY_WIDTH - tw) / 2, 25, text, 16);
     draw_status_bar();
     ui_draw_button_help("cancel -", NULL);
     epaper_partial_refresh();

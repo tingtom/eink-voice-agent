@@ -35,7 +35,7 @@ void mode_todo_stop(void)
     } else {
         audio_pipeline_stop_recording();
         audio_pipeline_send_end_recording();
-        ui_show_processing_screen();
+        ui_show_processing_screen("Thinking...");
         audio_pipeline_start_processing();
     }
 }

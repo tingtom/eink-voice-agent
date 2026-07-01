@@ -18,7 +18,7 @@ void mode_dashboard_start(void)
 void mode_dashboard_refresh(void)
 {
     if (!active) return;
-    ui_show_processing_screen();
+    ui_show_processing_screen("Loading...");
 }
 
 void mode_dashboard_set_data(const char *weather, const char *next_event, int lights_on, bool doors_locked)

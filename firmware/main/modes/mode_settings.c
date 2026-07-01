@@ -80,7 +80,7 @@ void mode_settings_select(void)
                 ui_show_error("No WiFi");
                 return;
             }
-            ui_show_processing_screen();
+            ui_show_processing_screen("Syncing...");
             recording_sync_start();
             break;
     }

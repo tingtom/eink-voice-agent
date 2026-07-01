@@ -37,7 +37,7 @@ void mode_note_stop(void)
         ui_show_response("Offline note saved!");
     } else {
         audio_pipeline_start_processing();  // Set BEFORE stopping to prevent spurious wake word checks
-        ui_show_processing_screen();
+        ui_show_processing_screen("Thinking...");
         audio_pipeline_stop_recording();
         audio_pipeline_send_end_recording();
     }
