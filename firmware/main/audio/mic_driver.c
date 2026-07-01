@@ -6,6 +6,7 @@
 #include "app_config.h"
 #include "es8311.h"
 #include "driver/i2s_std.h"
+#include "esp_timer.h"
 
 static const char *TAG = "MIC";
 
@@ -18,19 +19,22 @@ esp_err_t mic_read(int16_t *buffer, size_t samples, size_t *read)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Bypass esp_codec_dev_read — it wraps i2s_channel_read but has a bug
-    // that causes it to return immediately without reading data.
-    // Read directly from the I2S RX channel instead.
     size_t bytes_read = 0;
     size_t bytes_requested = samples * sizeof(int16_t);
-    int ret = i2s_channel_read(rx, buffer, bytes_requested, &bytes_read, pdMS_TO_TICKS(1000));
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "i2s_channel_read failed: %s (got %d bytes)", esp_err_to_name(ret), (int)bytes_read);
-        if (read) *read = 0;
-        return ESP_FAIL;
-    }
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t ret = i2s_channel_read(rx, buffer, bytes_requested, &bytes_read, pdMS_TO_TICKS(1000));
+    int64_t t1 = esp_timer_get_time();
+    int32_t elapsed_us = (int32_t)(t1 - t0);
 
     size_t samples_read = bytes_read / sizeof(int16_t);
     if (read) *read = samples_read;
+
+    ESP_LOGI(TAG, "i2s_channel_read: ret=%s requested=%d got=%d bytes (%d samples) elapsed=%ld us",
+             esp_err_to_name(ret), (int)bytes_requested, (int)bytes_read, (int)samples_read, (long)elapsed_us);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_channel_read FAILED: %s", esp_err_to_name(ret));
+        return ESP_FAIL;
+    }
     return ESP_OK;
 }
