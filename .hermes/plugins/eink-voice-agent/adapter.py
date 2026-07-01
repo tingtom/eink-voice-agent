@@ -356,39 +356,46 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         return web.json_response({"type": "response", "data": content})
 
     async def _process_end(self, session, mode, full_audio, chat_id, device_id):
-        # Calculate actual sample rate from timing
-        import base64 as _b64, time as _t
+        # Firmware always captures at 16kHz — use that directly rather than
+        # estimating from timing (HTTP buffering makes the estimate unreliable).
+        import base64 as _b64
         raw_len = len(_b64.b64decode(full_audio))
         total_samples = raw_len // 2  # 16-bit = 2 bytes per sample
         start_time = self._audio_start_times.pop(session, None)
-        elapsed = (_t.monotonic() - start_time) if start_time else 0
-        actual_sr = int(total_samples / elapsed) if elapsed > 0 else 16000
-        # Clamp to reasonable range (ES8311 can run as low as ~1kHz when misconfigured)
-        actual_sr = max(1000, min(48000, actual_sr))
-        logger.info("Audio timing: %d samples, %.2fs elapsed, estimated %d Hz",
+        elapsed = (__import__("time").monotonic() - start_time) if start_time else 0
+        actual_sr = 16000  # firmware always captures at 16kHz
+        logger.info("Audio: %d samples, %.2fs, using %d Hz",
                      total_samples, elapsed, actual_sr)
 
         if mode == "transcribe":
-            # Run transcription in background so /end returns quickly
+            # Run transcription in background so /end returns quickly.
+            # Use asyncio.to_thread to avoid blocking the event loop while
+            # whisper runs — otherwise poll requests from the firmware time out.
             async def _do_transcribe():
-                text = _transcribe_audio(full_audio, sample_rate=actual_sr)
-                timestamp = __import__("datetime").datetime.now().strftime(
-                    "%Y-%m-%d_%H-%M-%S"
-                )
-                note_file = NOTES_DIR / f"note_{timestamp}.txt"
-                note_file.write_text(text)
-                telemetry = _load_telemetry()
-                _log_activity({
-                    "type": "message", "direction": "in",
-                    "content": f"[voice note] {text[:500]}".strip(),
-                    "session_id": session,
-                    "battery": telemetry.get("battery"),
-                    "charging": telemetry.get("charging"),
-                    "wifi_rssi": telemetry.get("wifi_rssi"),
-                })
-                reply = f"Transcribed note saved:\n\n{text[:180]}"
-                self._pending_responses[chat_id] = reply
-                logger.info("Transcription complete: %s", text[:80])
+                try:
+                    text = await asyncio.to_thread(
+                        _transcribe_audio, full_audio, actual_sr
+                    )
+                    timestamp = __import__("datetime").datetime.now().strftime(
+                        "%Y-%m-%d_%H-%M-%S"
+                    )
+                    note_file = NOTES_DIR / f"note_{timestamp}.txt"
+                    note_file.write_text(text)
+                    telemetry = _load_telemetry()
+                    _log_activity({
+                        "type": "message", "direction": "in",
+                        "content": f"[voice note] {text[:500]}".strip(),
+                        "session_id": session,
+                        "battery": telemetry.get("battery"),
+                        "charging": telemetry.get("charging"),
+                        "wifi_rssi": telemetry.get("wifi_rssi"),
+                    })
+                    reply = f"Transcribed note saved:\n\n{text[:180]}"
+                    self._pending_responses[chat_id] = reply
+                    logger.info("Transcription complete: %s", text[:80])
+                except Exception as e:
+                    logger.error("Transcription task failed: %s", e)
+                    self._pending_responses[chat_id] = f"Transcription error: {e}"
 
             asyncio.create_task(_do_transcribe())
             # Return JSON so firmware can parse "Audio received"
