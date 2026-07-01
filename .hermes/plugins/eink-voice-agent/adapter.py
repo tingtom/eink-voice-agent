@@ -104,13 +104,13 @@ def _recent_activity(limit=50):
     return entries
 
 
-def _transcribe_audio(audio_base64: str) -> str:
+def _transcribe_audio(audio_base64: str, sample_rate: int = 16000) -> str:
     try:
         with open("/tmp/eink_audio_raw.bin", "wb") as f:
             f.write(__import__("base64").b64decode(audio_base64))
 
         result = subprocess.run(
-            ["ffmpeg", "-y", "-f", "s16le", "-ar", "16000", "-ac", "1",
+            ["ffmpeg", "-y", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
              "-i", "/tmp/eink_audio_raw.bin",
              "/tmp/eink_audio.wav"],
             capture_output=True, text=True, timeout=30,
@@ -144,6 +144,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         self._host = os.getenv("EINK_DEVICE_HOST", "0.0.0.0")
         self._http_server = None
         self._audio_buffers: dict[str, list[str]] = {}
+        self._audio_start_times: dict[str, float] = {}
         self._session_device_map: dict[str, str] = {}
         self._ws_by_chat: dict[str, object] = {}
         self._device_chat_map: dict[str, str] = {}
@@ -275,10 +276,11 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         mode = request.query.get("mode", "agent")
         body = await request.read()
 
-        import base64
+        import base64, time
         chunk_b64 = base64.b64encode(body).decode("ascii")
         if session not in self._audio_buffers:
             self._audio_buffers[session] = []
+            self._audio_start_times[session] = time.monotonic()
         self._audio_buffers[session].append(chunk_b64)
         self._session_device_map[session] = device_id
         return web.json_response({"status": "ok"})
@@ -348,8 +350,20 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         return web.json_response({"type": "response", "data": content})
 
     async def _process_end(self, session, mode, full_audio, chat_id, device_id):
+        # Calculate actual sample rate from timing
+        import base64 as _b64, time as _t
+        raw_len = len(_b64.b64decode(full_audio))
+        total_samples = raw_len // 2  # 16-bit = 2 bytes per sample
+        start_time = self._audio_start_times.pop(session, None)
+        elapsed = (_t.monotonic() - start_time) if start_time else 0
+        actual_sr = int(total_samples / elapsed) if elapsed > 0 else 16000
+        # Clamp to reasonable range
+        actual_sr = max(8000, min(48000, actual_sr))
+        logger.info("Audio timing: %d samples, %.2fs elapsed, estimated %d Hz",
+                     total_samples, elapsed, actual_sr)
+
         if mode == "transcribe":
-            text = _transcribe_audio(full_audio)
+            text = _transcribe_audio(full_audio, sample_rate=actual_sr)
             timestamp = __import__("datetime").datetime.now().strftime(
                 "%Y-%m-%d_%H-%M-%S"
             )
@@ -370,7 +384,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
 
         elif mode == "todo":
             if full_audio:
-                text = _transcribe_audio(full_audio)
+                text = _transcribe_audio(full_audio, sample_rate=actual_sr)
             else:
                 text = "list my todos"
             source = self.build_source(
@@ -408,7 +422,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             with wave.open(tmp.name, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
-                wf.setframerate(16000)
+                wf.setframerate(actual_sr)
                 wf.writeframes(raw)
             tmp.close()
 
