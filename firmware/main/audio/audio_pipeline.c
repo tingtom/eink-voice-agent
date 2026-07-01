@@ -200,15 +200,18 @@ static void anim_task(void *arg)
     int frame = 0;
 
     while (1) {
-        if (recording) {
+        if (processing) {
+            // Check processing first — it's set true before recording goes
+            // false, so we must not overwrite the processing screen with
+            // stale recording framebuffer data.
+            ui_update_processing_anim(frame++);
+            vTaskDelay(pdMS_TO_TICKS(250));
+        } else if (recording) {
             // Refresh display from framebuffer while recording — the capture
             // task writes bars into the buffer; we push them to the screen
             // here on a separate task so we don't block audio capture.
             epaper_partial_refresh();
             vTaskDelay(pdMS_TO_TICKS(300));
-        } else if (processing) {
-            ui_update_processing_anim(frame++);
-            vTaskDelay(pdMS_TO_TICKS(250));
         } else {
             vTaskDelay(pdMS_TO_TICKS(500));
         }
