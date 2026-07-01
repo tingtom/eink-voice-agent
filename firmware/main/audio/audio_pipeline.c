@@ -40,7 +40,7 @@ static audio_ui_cb_t wake_failed_cb = NULL;
 static audio_ui_cb_t wake_detected_cb = NULL;
 static audio_ui_cb_t recording_ended_cb = NULL;
 static response_cb_t response_cb = NULL;
-static char cached_response[512] = "";
+static char cached_response[2048] = "";
 
 static EventGroupHandle_t audio_events;
 #define AUDIO_EVENT_VAD_TRIGGERED  BIT0
@@ -446,7 +446,7 @@ static void response_poll_task(void *arg)
     snprintf(url, sizeof(url), "%s/api/device/response?chat_id=eink:%s",
              HERMES_HTTP_URL, DEVICE_ID);
 
-    char resp[1024];
+    char resp[2048];
     int retries = 0;
     const int max_retries = 80;  // ~120s timeout to match adapter
 
@@ -474,14 +474,13 @@ static void response_poll_task(void *arg)
         }
         resp[sizeof(resp) - 1] = '\0';
 
-        const char *type = json_extract_string(resp, "type");
-        if (type && strcmp(type, "response") == 0) {
-            const char *data = json_extract_string(resp, "data");
-            if (data) {
-                ESP_LOGI(TAG, "Response received: %.100s", data);
-                if (response_cb) response_cb(data);
-                goto done;
-            }
+        // Adapter returns plain text (200) or empty body (204).
+        // Plain text = response content; empty = no response yet.
+        size_t len = strlen(resp);
+        if (len > 0) {
+            ESP_LOGI(TAG, "Response received: %.100s", resp);
+            if (response_cb) response_cb(resp);
+            goto done;
         }
 
         retries++;
@@ -503,7 +502,7 @@ void audio_pipeline_send_end_recording(void)
 
     char json[128];
     snprintf(json, sizeof(json), "{\"mode\":\"%s\"}", mode_str[current_mode]);
-    char resp[512];
+    char resp[2048];
     esp_err_t ret = http_post_json(url, json, resp, sizeof(resp));
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "http_audio: end POST failed: %s", esp_err_to_name(ret));
@@ -511,15 +510,16 @@ void audio_pipeline_send_end_recording(void)
     }
     ESP_LOGI(TAG, "End of recording sent (mode=%s)", mode_str[current_mode]);
 
+    // Adapter returns plain text — cache it if it's a real response
     resp[sizeof(resp) - 1] = '\0';
     cached_response[0] = '\0';
-    const char *data = json_extract_string(resp, "data");
-    if (data && !strstr(data, "Audio received") && !strstr(data, "command processed")) {
-        strlcpy(cached_response, data, sizeof(cached_response));
+    size_t len = strlen(resp);
+    if (len > 0 && !strstr(resp, "Audio received") && !strstr(resp, "command processed")) {
+        strlcpy(cached_response, resp, sizeof(cached_response));
         ESP_LOGI(TAG, "Cached end response (%.100s)", cached_response);
     }
 
-    xTaskCreate(response_poll_task, "resp_poll", 4096, NULL, 3, NULL);
+    xTaskCreate(response_poll_task, "resp_poll", 6144, NULL, 3, NULL);
 }
 
 audio_mode_t audio_pipeline_get_current_mode(void)

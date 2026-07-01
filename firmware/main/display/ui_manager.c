@@ -254,10 +254,29 @@ void ui_update_processing_anim(int frame)
     epaper_partial_refresh();
 }
 
+// Strip non-ASCII bytes (emojis, etc.) that the bitmap font can't render.
+// Operates in-place on the provided buffer.
+static void strip_non_ascii(char *dst, const char *src, size_t dst_size)
+{
+    size_t j = 0;
+    while (*src && j < dst_size - 1) {
+        if ((unsigned char)*src < 0x80) {
+            dst[j++] = *src;
+        }
+        // Skip multi-byte UTF-8 sequences (bytes >= 0x80)
+        src++;
+    }
+    dst[j] = '\0';
+}
+
 void ui_show_response(const char *text)
 {
+    // Strip emojis/non-ASCII before display
+    static char clean[1024];
+    strip_non_ascii(clean, text, sizeof(clean));
+
     epaper_clear();
-    epaper_draw_text(10, 20, text, 12);
+    epaper_draw_text(10, 20, clean, 12);
     draw_status_bar();
     ui_draw_button_help(NULL, "back -");
     epaper_partial_refresh();

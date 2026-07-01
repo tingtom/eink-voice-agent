@@ -326,7 +326,8 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             # If _process_end already returned a web.Response, use it directly
             if isinstance(reply, web.Response):
                 return reply
-            return web.json_response({"type": "response", "data": reply})
+            # Return plain text to avoid JSON unicode escape issues on firmware
+            return web.Response(text=str(reply), content_type="text/plain")
         except Exception as e:
             logger.error("Audio processing error: %s", e)
             return web.json_response({"error": str(e)}, status=500)
@@ -351,9 +352,11 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         chat_id = request.query.get("chat_id", "unknown")
         content = self._pending_responses.pop(chat_id, None)
         if content is None:
-            return web.json_response({"type": "no_response"})
+            # Return empty body — firmware treats empty as "no response"
+            return web.Response(status=204)
         content = content.replace("```", "`").replace("  ", " ")  # sanitize for device
-        return web.json_response({"type": "response", "data": content})
+        # Return plain text — avoids JSON unicode escape issues on firmware
+        return web.Response(text=content, content_type="text/plain")
 
     async def _process_end(self, session, mode, full_audio, chat_id, device_id):
         # Firmware always captures at 16kHz — use that directly rather than
