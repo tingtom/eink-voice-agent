@@ -179,6 +179,18 @@ static void on_wake_failed(void)
     }
 }
 
+static void on_wake_detected(void)
+{
+    // Wake word was detected, show the recording screen
+    ESP_LOGI(TAG, "Wake word detected callback triggered");
+    if (current_app_mode == APP_MODE_HOME) {
+        current_app_mode = APP_MODE_VOICE_AGENT;
+        current_sub = SUB_RECORDING;
+        ui_show_recording_screen();
+        board_power_led_on();
+    }
+}
+
 static void on_recording_ended(void)
 {
     // Already handled by mode stop functions
@@ -506,9 +518,9 @@ static void handle_button(button_id_t btn)
 
     case APP_MODE_SETTINGS:
         if (btn == BUTTON_SELECT) {
-            mode_settings_prev();
-        } else if (btn == BUTTON_BACK) {
             mode_settings_next();
+        } else if (btn == BUTTON_BACK) {
+            mode_settings_prev();
         }
         break;
 
@@ -739,6 +751,7 @@ void app_main(void)
     button_set_longpress_callback(handle_longpress, 1500);
     buttons_init();
     audio_pipeline_init();
+    audio_pipeline_set_wake_detected_cb(on_wake_detected);
     audio_pipeline_set_wake_failed_cb(on_wake_failed);
     audio_pipeline_set_recording_ended_cb(on_recording_ended);
     audio_pipeline_set_response_cb(on_response);

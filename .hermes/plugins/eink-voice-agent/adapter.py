@@ -269,8 +269,12 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         device_id = request.headers.get("X-Device-ID", "unknown")
         chat_id = self._device_chat_map.get(device_id)
         if not chat_id:
-            logger.warning("Device not authenticated: %s", device_id)
-            return web.json_response({"error": "not authenticated"}, status=401)
+            # Auto-register device on first contact (auth may have been lost
+            # due to gateway restart — the X-Device-ID header is trustworthy)
+            chat_id = f"eink:{device_id}"
+            self._device_chat_map[device_id] = chat_id
+            logger.info("Auto-registered device '%s' (chat_id=%s)", device_id, chat_id)
+            _log_activity({"type": "connect", "detail": f"Device '{device_id}' auto-registered via audio"})
 
         session = request.query.get("session_id", chat_id)
         mode = request.query.get("mode", "agent")
@@ -301,7 +305,10 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             chat_id = self._device_chat_map.get(device_id)
 
         if not chat_id:
-            return web.json_response({"error": "not authenticated"}, status=401)
+            # Auto-register like _handle_audio does
+            chat_id = f"eink:{device_id}"
+            self._device_chat_map[device_id] = chat_id
+            logger.info("Auto-registered device '%s' on /end (chat_id=%s)", device_id, chat_id)
 
         if not session:
             session = chat_id

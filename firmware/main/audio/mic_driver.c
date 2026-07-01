@@ -29,7 +29,7 @@ esp_err_t mic_read(int16_t *buffer, size_t samples, size_t *read)
     size_t samples_read = bytes_read / sizeof(int16_t);
     if (read) *read = samples_read;
 
-    ESP_LOGI(TAG, "i2s_channel_read: ret=%s requested=%d got=%d bytes (%d samples) elapsed=%ld us",
+    ESP_LOGD(TAG, "i2s_channel_read: ret=%s requested=%d got=%d bytes (%d samples) elapsed=%ld us",
              esp_err_to_name(ret), (int)bytes_requested, (int)bytes_read, (int)samples_read, (long)elapsed_us);
 
     if (ret != ESP_OK) {

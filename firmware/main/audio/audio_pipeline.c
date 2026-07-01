@@ -23,6 +23,7 @@
 #include "system_init.h"
 #include "wifi_manager.h"
 #include "driver/i2s_std.h"
+#include "epaper_driver.h"
 
 static const char *TAG = "AUDIO_PIPELINE";
 
@@ -82,7 +83,7 @@ static void audio_capture_task(void *arg)
         int32_t delta_us = (int32_t)(now - last_iter_time);
         last_iter_time = now;
         iter++;
-        if (iter % 5 == 0) {
+        if (iter % 20 == 0) {
             // Calculate actual capture rate from delta_us
             int capture_rate = (delta_us > 0) ? (int)((int64_t)read * 1000000 / delta_us) : 0;
             ESP_LOGI(TAG, "capture iter=%lu read=%u ret=%s delta_us=%ld rate=%dHz heap=%u avail=%u",
@@ -200,6 +201,10 @@ static void anim_task(void *arg)
 
     while (1) {
         if (recording) {
+            // Refresh display from framebuffer while recording — the capture
+            // task writes bars into the buffer; we push them to the screen
+            // here on a separate task so we don't block audio capture.
+            epaper_partial_refresh();
             vTaskDelay(pdMS_TO_TICKS(300));
         } else if (processing) {
             ui_update_processing_anim(frame++);

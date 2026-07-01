@@ -180,7 +180,7 @@ void ui_show_recording_screen(void)
     ui_draw_button_help("cancel -", NULL);
     recording_frame = 0;
     for (int i = 0; i < VIZ_BAR_COUNT; i++) {
-        viz_buf[i] = 0;
+        viz_buf[i] = 2;  // minimum height so all bars are visible from the start
         viz_prev[i] = 0;
     }
     epaper_partial_refresh();
