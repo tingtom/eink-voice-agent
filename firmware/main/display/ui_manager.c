@@ -212,7 +212,9 @@ void ui_update_recording_viz(int32_t energy)
         }
     }
 
-    epaper_partial_refresh();
+    // NOTE: epaper_partial_refresh() removed from here — it blocks for ~500ms
+    // and starves the audio capture task.  Display will update when recording
+    // stops and a full/partial refresh is triggered elsewhere.
 }
 
 void ui_show_processing_screen(void)
