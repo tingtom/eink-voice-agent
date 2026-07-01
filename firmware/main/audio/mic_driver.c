@@ -20,6 +20,7 @@ esp_err_t mic_read(int16_t *buffer, size_t samples, size_t *read)
 
     // NOTE: esp_codec_dev_read returns a status code (0 = ESP_CODEC_DEV_OK),
     // NOT a byte count. On success the full buffer is filled by i2s_channel_read.
+    // However, with a 1000ms timeout, partial reads are possible.
     size_t bytes_requested = samples * sizeof(int16_t);
     int ret = esp_codec_dev_read(h, buffer, bytes_requested);
     if (ret < 0) {
@@ -28,7 +29,7 @@ esp_err_t mic_read(int16_t *buffer, size_t samples, size_t *read)
         return ESP_FAIL;
     }
 
-    // Success: i2s_channel_read filled the entire buffer
+    // Success: assume full buffer filled (esp_codec_dev_read doesn't report bytes_read)
     if (read) *read = samples;
     return ESP_OK;
 }

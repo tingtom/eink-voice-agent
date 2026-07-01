@@ -65,13 +65,13 @@ static esp_err_t es8311_i2s_hw_init(void)
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
         },
-.slot_cfg = {
-        .slot_mode = I2S_SLOT_MODE_MONO,
-        .slot_mask = I2S_STD_SLOT_LEFT,
-        .ws_width = 16,
-        .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
-        .bit_shift = true,  // Required: ESP-IDF quirk for proper ADC data alignment
-    },
+        .slot_cfg = {
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = 16,
+            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
+            .bit_shift = true,  // Required: ESP-IDF quirk for proper ADC data alignment
+        },
         .gpio_cfg = {
             .mclk = I2S_MCLK_GPIO,
             .bclk = I2S_BCLK_GPIO,
@@ -293,6 +293,29 @@ esp_err_t es8311_init(void)
         ESP_LOGE(TAG, "Failed to open record device: %d", open_ret);
         esp_codec_dev_close(g_playback_handle);
         goto fail;
+    }
+
+    // Explicitly set ES8311 clock dividers to guarantee correct sample rate.
+    // esp_codec_dev_open may not write these correctly. MCLK=4.096MHz (16k×256),
+    // LRCK divider=256 → 16kHz, BCLK divider=4 → 1.024MHz.
+    {
+        // Reg 0x06: BCLK divider = (value+1), set to 3 → divider=4
+        esp_codec_dev_write_reg(g_record_handle, 0x06, 0x03);
+        // Reg 0x07: LRCK high byte = 0x00
+        esp_codec_dev_write_reg(g_record_handle, 0x07, 0x00);
+        // Reg 0x08: LRCK low byte = 0xFF → full divider = (0x00 << 8) | 0xFF = 255, actual divider = 256
+        esp_codec_dev_write_reg(g_record_handle, 0x08, 0xFF);
+        ESP_LOGI(TAG, "ES8311 clock dividers forced: BCLK_div=4, LRCK_div=256 (16kHz @ MCLK=4.096MHz)");
+
+        // Read back to verify
+        int rb = 0;
+        esp_codec_dev_read_reg(g_record_handle, 0x06, &rb); ESP_LOGI(TAG, "REG 0x06 after write: 0x%02X (expect 0x03)", rb);
+        esp_codec_dev_read_reg(g_record_handle, 0x07, &rb); ESP_LOGI(TAG, "REG 0x07 after write: 0x%02X (expect 0x00)", rb);
+        esp_codec_dev_read_reg(g_record_handle, 0x08, &rb); ESP_LOGI(TAG, "REG 0x08 after write: 0x%02X (expect 0xFF)", rb);
+        esp_codec_dev_read_reg(g_record_handle, 0x02, &rb); ESP_LOGI(TAG, "REG 0x02 (PLL): 0x%02X (expect 0x00)", rb);
+        esp_codec_dev_read_reg(g_record_handle, 0x05, &rb); ESP_LOGI(TAG, "REG 0x05 (dividers): 0x%02X (expect 0x00)", rb);
+        esp_codec_dev_read_reg(g_record_handle, 0x03, &rb); ESP_LOGI(TAG, "REG 0x03 (ADC OSR): 0x%02X (expect 0x10)", rb);
+        esp_codec_dev_read_reg(g_record_handle, 0x04, &rb); ESP_LOGI(TAG, "REG 0x04 (DAC OSR): 0x%02X (expect 0x10 or 0x20)", rb);
     }
 
     // Verify I2C communication by reading chip ID
