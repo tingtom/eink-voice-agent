@@ -518,9 +518,9 @@ static void handle_button(button_id_t btn)
 
     case APP_MODE_SETTINGS:
         if (btn == BUTTON_SELECT) {
-            mode_settings_next();
-        } else if (btn == BUTTON_BACK) {
             mode_settings_prev();
+        } else if (btn == BUTTON_BACK) {
+            mode_settings_next();
         }
         break;
 
