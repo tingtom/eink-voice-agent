@@ -132,7 +132,14 @@ static void http_send_task(void *arg)
     const size_t chunk_samples = sizeof(send_buf) / sizeof(send_buf[0]);
 
     while (1) {
-        if (!recording || pipeline_docked || !wifi_is_connected()) {
+        if (pipeline_docked || !wifi_is_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        /* After recording stops, drain remaining ring buffer data so the
+           adapter receives all captured audio before the end signal. */
+        if (!recording && ringbuffer_available(&audio_rb) == 0) {
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
@@ -377,7 +384,7 @@ static void response_poll_task(void *arg)
 
     char resp[1024];
     int retries = 0;
-    const int max_retries = 20;  // ~30s timeout
+    const int max_retries = 80;  // ~120s timeout to match adapter
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
@@ -432,7 +439,7 @@ void audio_pipeline_send_end_recording(void)
 
     char json[128];
     snprintf(json, sizeof(json), "{\"mode\":\"%s\"}", mode_str[current_mode]);
-    char resp[64];
+    char resp[512];
     esp_err_t ret = http_post_json(url, json, resp, sizeof(resp));
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "http_audio: end POST failed: %s", esp_err_to_name(ret));

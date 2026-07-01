@@ -128,7 +128,7 @@ def _transcribe_audio(audio_base64: str) -> str:
             logger.warning("whisper failed: %s", result.stderr)
             return "[transcription failed]"
 
-        txt_path = Path("/tmp/eink_audio.wav.txt")
+        txt_path = Path("/tmp/eink_audio.txt")
         if txt_path.exists():
             return txt_path.read_text().strip()
         return "[empty transcription]"
@@ -268,6 +268,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         device_id = request.headers.get("X-Device-ID", "unknown")
         chat_id = self._device_chat_map.get(device_id)
         if not chat_id:
+            logger.warning("Device not authenticated: %s", device_id)
             return web.json_response({"error": "not authenticated"}, status=401)
 
         session = request.query.get("session_id", chat_id)
@@ -279,7 +280,6 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         if session not in self._audio_buffers:
             self._audio_buffers[session] = []
         self._audio_buffers[session].append(chunk_b64)
-        # Track device_id per session for audio/end lookup
         self._session_device_map[session] = device_id
         return web.json_response({"status": "ok"})
 
@@ -304,8 +304,17 @@ class EInkDeviceAdapter(BasePlatformAdapter):
         if not session:
             session = chat_id
         mode = body.get("mode", "agent")
+
+        # Wait briefly for in-flight audio chunks that left the firmware
+        # after recording stopped but before the ring buffer drain completed.
+        await asyncio.sleep(0.5)
+
         chunks = self._audio_buffers.pop(session, [])
-        full_audio = "".join(chunks)
+        # Each chunk is independently base64-encoded; concatenate decoded bytes
+        import base64
+        raw_parts = [base64.b64decode(c) for c in chunks]
+        full_audio = base64.b64encode(b"".join(raw_parts)).decode("ascii")
+        logger.info("Popped %d audio chunks for session=%s", len(chunks), session)
 
         try:
             reply = await self._process_end(session, mode, full_audio, chat_id, device_id)
@@ -410,13 +419,28 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             )
             event = MessageEvent(
                 text="[agent audio input]",
-                message_type=MessageType.TEXT,
+                message_type=MessageType.VOICE,
                 source=source,
                 message_id=session,
                 media_urls=[tmp.name],
                 media_types=["audio/wav"],
             )
-            await self.handle_message(event)
+
+            # For agent mode: wait for response synchronously.
+            # Spawn session processing and poll for the response.
+            self._start_session_processing(event, chat_id)
+
+            # Poll for response with extended timeout (60s)
+            for i in range(120):
+                await asyncio.sleep(0.5)
+                response = self._pending_responses.pop(chat_id, None)
+                if response:
+                    logger.info("Got LLM response after %d polls", i)
+                    return response
+
+            # Timeout — return acknowledgment
+            logger.info("Audio received (response pending)")
+
             telemetry = _load_telemetry()
             _log_activity({
                 "type": "message", "direction": "in",
@@ -429,6 +453,7 @@ class EInkDeviceAdapter(BasePlatformAdapter):
             return "Audio received"
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
+        logger.info("send() called: chat_id=%s, content=%.60s", chat_id, content[:100] if content else "")
         self._pending_responses[chat_id] = content
         telemetry = _load_telemetry()
         _log_activity({
@@ -615,6 +640,7 @@ def register(ctx):
             "For notes, confirm the saved note text."
         ),
         emoji="🖊️",
+        cron_deliver_env_var="EINK_VOICE_AGENT_HOME_CHANNEL",
     )
 
     ctx.register_tool(
