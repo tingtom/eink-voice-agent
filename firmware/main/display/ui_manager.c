@@ -269,14 +269,62 @@ static void strip_non_ascii(char *dst, const char *src, size_t dst_size)
     dst[j] = '\0';
 }
 
+// Word-wrap text to fit within max_width pixels at the given font scale.
+// Writes newline-separated text into dst.
+static void word_wrap(char *dst, size_t dst_size, const char *src, int max_width_px, int scale)
+{
+    int char_px = (5 + 1) * scale;  // FONT_5X7_WIDTH + 1 spacing
+    int max_chars = max_width_px / char_px;
+    if (max_chars < 1) max_chars = 1;
+
+    size_t di = 0;
+    int line_len = 0;
+
+    while (*src && di < dst_size - 1) {
+        if (*src == '\n') {
+            dst[di++] = '\n';
+            src++;
+            line_len = 0;
+            continue;
+        }
+
+        // Measure next word (run of non-space, non-newline chars)
+        const char *word_start = src;
+        while (*src && *src != ' ' && *src != '\n') src++;
+        int word_len = (int)(src - word_start);
+
+        // If word doesn't fit on current line, wrap before it
+        if (line_len > 0 && line_len + word_len + 1 > max_chars) {
+            dst[di++] = '\n';
+            line_len = 0;
+        }
+
+        // Copy the word
+        for (int i = 0; i < word_len && di < dst_size - 1; i++) {
+            dst[di++] = word_start[i];
+        }
+        line_len += word_len;
+
+        // Copy trailing space (if present and not at line start)
+        if (*src == ' ') {
+            dst[di++] = ' ';
+            src++;
+            line_len++;
+        }
+    }
+    dst[di] = '\0';
+}
+
 void ui_show_response(const char *text)
 {
-    // Strip emojis/non-ASCII before display
+    // Strip emojis, then word-wrap to fit the display
     static char clean[1024];
+    static char wrapped[1024];
     strip_non_ascii(clean, text, sizeof(clean));
+    word_wrap(wrapped, sizeof(wrapped), clean, 180, 2);  // 180px usable, scale 2
 
     epaper_clear();
-    epaper_draw_text(10, 20, clean, 12);
+    epaper_draw_text(10, 20, wrapped, 12);
     draw_status_bar();
     ui_draw_button_help(NULL, "back -");
     epaper_partial_refresh();

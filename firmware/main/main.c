@@ -39,6 +39,7 @@
 #include "mdns.h"
 #include "driver/spi_common.h"
 #include "esp_log.h"
+#include "speaker_driver.h"
 
 static const char *TAG = "MAIN";
 
@@ -201,8 +202,12 @@ static void on_response(const char *text)
     if (strcmp(text, "Response timed out") == 0) {
         audio_pipeline_stop_processing();
         ui_show_error("Request timed out");
+        speaker_play_tone(300, 150);  // Error tone
         return;
     }
+    // Response received chime
+    speaker_play_tone(880, 60);
+    speaker_play_tone(1100, 60);
     switch (current_app_mode) {
         case APP_MODE_VOICE_AGENT: mode_voice_agent_handle_response(text); break;
         case APP_MODE_TRANSCRIBE:  mode_transcribe_handle_response(text);  break;
@@ -389,6 +394,7 @@ static void handle_longpress(button_id_t btn)
             power_enter_deep_sleep(0);
         } else if (btn == BUTTON_SELECT) {
             // BOOT long = enter mode
+            speaker_play_tone(660, 40);  // Confirm tone
             enter_mode(visible_menu_modes[menu_selection]);
         }
         return;
@@ -486,9 +492,11 @@ static void handle_button(button_id_t btn)
         if (btn == BUTTON_SELECT) {
             menu_selection = (menu_selection > 0) ? menu_selection - 1 : visible_menu_count - 1;
             ui_show_menu((const char **)visible_menu_items, visible_menu_count, menu_selection);
+            speaker_play_tone(1000, 20);
         } else if (btn == BUTTON_BACK) {
             menu_selection = (menu_selection + 1) % visible_menu_count;
             ui_show_menu((const char **)visible_menu_items, visible_menu_count, menu_selection);
+            speaker_play_tone(1000, 20);
         }
         break;
     }
@@ -766,6 +774,9 @@ void app_main(void)
     } else {
         ui_show_home_screen();
         rebuild_visible_menu();
+        // Startup chime: ascending two-tone
+        speaker_play_tone(880, 80);
+        speaker_play_tone(1320, 80);
     }
 
     ESP_LOGI(TAG, "Initialization complete, entering main loop");
