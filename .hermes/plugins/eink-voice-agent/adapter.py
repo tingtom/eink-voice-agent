@@ -121,7 +121,7 @@ def _transcribe_audio(audio_base64: str) -> str:
 
         result = subprocess.run(
             ["whisper", "/tmp/eink_audio.wav", "--language", "en",
-             "--output_dir", "/tmp/", "--output_format", "txt", "--model", "tiny"],
+             "--output_dir", "/tmp/", "--output_format", "txt", "--model", "base"],
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
